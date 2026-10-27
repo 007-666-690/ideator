@@ -1,7 +1,16 @@
 @echo off
 setlocal
-cd /d "%~dp0backend"
 echo === Ideator ===
+if exist "%~dp0backend\requirements.txt" goto :inside
+echo.
+echo Este iniciar.bat tiene que estar dentro de la carpeta ideator, al lado de la carpeta backend.
+echo Ahora esta en: %~dp0
+echo Muevelo a la carpeta ideator, reemplazando el que ya esta, y abrelo desde ahi.
+pause
+exit /b 1
+
+:inside
+cd /d "%~dp0backend"
 
 rem Busca un Python 3.10+ real. "python" puede ser el acceso directo de la Microsoft Store, que no sirve.
 set "PY="
@@ -19,14 +28,18 @@ if not defined PY goto :nopython
 
 :found
 echo Usando Python: %PY%
-if exist ".venv\Scripts\python.exe" goto :env
+rem La marca instalado.ok se crea solo si las dependencias quedaron completas.
+if exist ".venv\instalado.ok" goto :env
+if exist ".venv\Scripts\python.exe" goto :deps
 echo Creando entorno virtual...
 "%PY%" -m venv .venv
 if errorlevel 1 goto :fail
-".venv\Scripts\python.exe" -m pip install --upgrade pip >nul
+
+:deps
 echo Instalando dependencias, solo la primera vez. Tarda unos minutos...
-".venv\Scripts\python.exe" -m pip install -r requirements.txt
-if errorlevel 1 goto :fail
+".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r requirements.txt
+if errorlevel 1 goto :netfail
+echo ok> ".venv\instalado.ok"
 
 :env
 if exist ".env" goto :run
@@ -68,6 +81,17 @@ exit /b 0
 
 :manual
 echo Instala Python 3.12 desde https://www.python.org/downloads/ marcando "Add python.exe to PATH" y vuelve a abrir iniciar.bat.
+pause
+exit /b 1
+
+:netfail
+echo.
+echo No se pudieron descargar las dependencias. Revisando la conexion de Python...
+"%PY%" -c "import urllib.request, socket; print('Proxy de Windows:', urllib.request.getproxies() or 'ninguno'); socket.create_connection(('pypi.org', 443), 8); print('Python SI llega a internet.')"
+echo.
+echo Si arriba dice "Permission denied" o "WinError 10013", el antivirus o firewall
+echo - por ejemplo McAfee - esta bloqueando a Python. Permite python.exe en el firewall
+echo o apagalo unos minutos, y vuelve a abrir iniciar.bat. Retoma donde quedo.
 pause
 exit /b 1
 
