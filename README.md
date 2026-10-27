@@ -91,4 +91,4 @@ Google es análogo, con el callback `/api/auth/sso/google/callback`.
 ## Proceso de trabajo (Jira + GitHub)
 
 - Cada épica de Jira corresponde a una rama `feature/<epica>`. Las ramas se integran a `develop` por pull request y `develop` se publica en `main`.
-- Commits con el formato `tipo: SCRUM-N descripción` (`feat`, `fix`, `docs`, `style`, `test`, `chore`), siempre asociados a una tarea.
+- Commits con el formato `tipo: SCRUM-N descripción` (`feat`, `fix`, `docs` y `style`, el estándar del curso), siempre asociados a una tarea de Jira.
