@@ -115,3 +115,133 @@ def logout(settings: Settings = Depends(get_settings)) -> Response:
 def me(user: User = Depends(get_current_user)) -> UserOut:
     return user_out(user)
 
+
+# ---------------------------------------------------------------------------
+# SSO
+# ---------------------------------------------------------------------------
+
+
+def _provider_config(provider: str, settings: Settings) -> dict[str, Any] | None:
+    if provider == "microsoft" and settings.microsoft_client_id and settings.microsoft_client_secret:
+        return {
+            "client_id": settings.microsoft_client_id,
+            "client_secret": settings.microsoft_client_secret,
+            "server_metadata_url": f"https://login.microsoftonline.com/{settings.microsoft_tenant}/v2.0/.well-known/openid-configuration",
+        }
+    if provider == "google" and settings.google_client_id and settings.google_client_secret:
+        return {
+            "client_id": settings.google_client_id,
+            "client_secret": settings.google_client_secret,
+            "server_metadata_url": "https://accounts.google.com/.well-known/openid-configuration",
+        }
+    return None
+
+
+_oauth_clients: dict[str, Any] = {}
+
+
+def get_oauth_client(provider: str, settings: Settings) -> Any:
+    if provider not in PROVIDERS:
+        raise ApiError(404, "unknown_provider", "Proveedor de SSO desconocido.")
+    config = _provider_config(provider, settings)
+    if config is None:
+        raise ApiError(503, "sso_not_configured", f"El inicio de sesión con {PROVIDERS[provider]} no está configurado.")
+    if provider not in _oauth_clients:
+        from authlib.integrations.starlette_client import OAuth
+
+        oauth = OAuth()
+        oauth.register(
+            name=provider,
+            client_kwargs={"scope": "openid email profile", "code_challenge_method": "S256"},
+            **config,
+        )
+        _oauth_clients[provider] = oauth.create_client(provider)
+    return _oauth_clients[provider]
+
+
+@router.get("/providers")
+def providers(settings: Settings = Depends(get_settings)) -> list[dict[str, Any]]:
+    return [{"id": p, "name": name, "enabled": _provider_config(p, settings) is not None} for p, name in PROVIDERS.items()]
+
+
+@router.get("/sso/{provider}/login")
+async def sso_login(provider: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    client = get_oauth_client(provider, settings)
+    redirect_uri = f"{settings.backend_public_url.rstrip('/')}/api/auth/sso/{provider}/callback"
+    return await client.authorize_redirect(request, redirect_uri)
+
+
+def _microsoft_issuer_ok(claims: Any, value: str) -> bool:
+    match = _MS_ISSUER.match(value or "")
+    return bool(match and match.group(1).lower() == str(claims.get("tid", "")).lower())
+
+
+class SsoLinkError(Exception):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def link_sso_user(db: Session, provider: str, claims: dict[str, Any]) -> User:
+    """Busca la identidad externa; si no existe, crea el usuario local."""
+    if provider == "microsoft":
+        oid, tid = claims.get("oid"), claims.get("tid")
+        subject = f"{tid}:{oid}" if oid and tid else None
+        email = claims.get("email") or claims.get("preferred_username")
+    else:
+        subject = claims.get("sub")
+        email = claims.get("email") if claims.get("email_verified", True) else None
+    if not subject or not email:
+        raise SsoLinkError("sso_missing_claims")
+    email = str(email).lower()
+    identity = db.scalar(select(SsoIdentity).where(SsoIdentity.provider == provider, SsoIdentity.subject == subject))
+    if identity is not None:
+        user = identity.user
+    else:
+        if db.scalar(select(User).where(User.email == email)):
+            # No se vincula automáticamente una cuenta existente (evita tomas de cuenta).
+            raise SsoLinkError("sso_email_in_use")
+        user = User(email=email, name=str(claims.get("name") or email.split("@")[0])[:120], password_hash=None)
+        db.add(user)
+        db.flush()
+        db.add(SsoIdentity(user_id=user.id, provider=provider, subject=subject, email=email))
+        log_activity(db, None, user, "user.registered", {"provider": provider})
+    user.last_login_at = utcnow()
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _link_in_new_session(provider: str, claims: dict[str, Any]) -> User:
+    db = SessionLocal()
+    try:
+        return link_sso_user(db, provider, claims)
+    finally:
+        db.close()
+
+
+@router.get("/sso/{provider}/callback")
+async def sso_callback(provider: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    from authlib.integrations.starlette_client import OAuthError
+
+    client = get_oauth_client(provider, settings)
+    login_url = f"{settings.frontend_url.rstrip('/')}/login"
+    kwargs: dict[str, Any] = {}
+    if provider == "microsoft":
+        kwargs["claims_options"] = {"iss": {"essential": True, "validate": _microsoft_issuer_ok}}
+    try:
+        token = await client.authorize_access_token(request, **kwargs)
+    except OAuthError as exc:
+        logger.warning("SSO rechazado", extra={"provider": provider, "error": str(exc)[:200]})
+        return RedirectResponse(f"{login_url}?error=sso_failed", status_code=302)
+    except Exception as exc:  # noqa: BLE001 - proveedor caído o red
+        logger.warning("SSO no disponible", extra={"provider": provider, "error": str(exc)[:200]})
+        return RedirectResponse(f"{login_url}?error=sso_unavailable", status_code=302)
+    claims = dict(token.get("userinfo") or {})
+    try:
+        user = await run_in_threadpool(_link_in_new_session, provider, claims)
+    except SsoLinkError as exc:
+        return RedirectResponse(f"{login_url}?error={exc.code}", status_code=302)
+    response = RedirectResponse(f"{settings.frontend_url.rstrip('/')}/", status_code=302)
+    set_session_cookie(response, create_access_token(user.id, settings), settings)
+    return response
