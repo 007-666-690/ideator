@@ -1,0 +1,38 @@
+# Ideator: docker compose up --build  →  http://localhost:8080
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ideator
+      POSTGRES_USER: ideator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ideator}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ideator -d ideator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://ideator:${POSTGRES_PASSWORD:-ideator}@db:5432/ideator
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL:-http://localhost:8080}
+      CORS_ORIGINS: ${FRONTEND_URL:-http://localhost:8080}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
