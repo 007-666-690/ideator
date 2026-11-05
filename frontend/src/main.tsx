@@ -6,6 +6,7 @@ import { ToastProvider } from "./components/ui";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import ProjectPage from "./pages/Project";
+import SessionPage from "./pages/Session";
 import "@fontsource-variable/instrument-sans/wdth.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/600.css";
@@ -39,6 +40,14 @@ createRoot(document.getElementById("root")!).render(
               element={
                 <Protected>
                   <ProjectPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/sesion"
+              element={
+                <Protected>
+                  <SessionPage />
                 </Protected>
               }
             />

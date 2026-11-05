@@ -15,13 +15,15 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
 from ..db import SessionLocal, get_db
-from ..deps import get_current_user
+from ..deps import extract_token, get_current_user
 from ..errors import ApiError
 from ..ideator.engine import log_activity
-from ..models import SsoIdentity, User, utcnow
+from ..models import RevokedToken, SsoIdentity, User, utcnow
 from ..security import (
+    JWT_ALGORITHM,
     clear_session_cookie,
     create_access_token,
+    decode_access_token,
     hash_password,
     login_throttle,
     set_session_cookie,
@@ -77,7 +79,7 @@ def register(body: RegisterIn, response: Response, db: Session = Depends(get_db)
     db.flush()
     log_activity(db, None, user, "user.registered")
     db.commit()
-    set_session_cookie(response, create_access_token(user.id, settings), settings)
+    set_session_cookie(response, create_access_token(user, settings), settings)
     return user_out(user)
 
 
@@ -100,12 +102,24 @@ def login(
     login_throttle.reset(key)
     user.last_login_at = utcnow()
     db.commit()
-    set_session_cookie(response, create_access_token(user.id, settings), settings)
+    set_session_cookie(response, create_access_token(user, settings), settings)
     return user_out(user)
 
 
 @router.post("/logout", status_code=204)
-def logout(settings: Settings = Depends(get_settings)) -> Response:
+def logout(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Response:
+    """Cierra la sesión: borra la cookie y revoca el token (su jti) para que no sirva aunque lo hayan copiado."""
+    token = extract_token(request, settings)
+    if token:
+        try:
+            claims = decode_access_token(token, settings)
+        except ApiError:
+            claims = None  # ya venció o es inválido: no hay nada que revocar
+        if claims is not None and db.get(RevokedToken, claims.jti) is None:
+            db.add(RevokedToken(jti=claims.jti, user_id=claims.user_id, expires_at=claims.expires_at))
+        # Limpieza: los tokens ya vencidos no necesitan seguir en la lista
+        db.query(RevokedToken).filter(RevokedToken.expires_at < utcnow()).delete(synchronize_session=False)
+        db.commit()
     response = Response(status_code=204)
     clear_session_cookie(response, settings)
     return response
@@ -114,6 +128,48 @@ def logout(settings: Settings = Depends(get_settings)) -> Response:
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)) -> UserOut:
     return user_out(user)
+
+
+# Explicación de cada campo del token, para la pantalla "Mi sesión" y para quien inspeccione la API.
+CLAIM_INFO = [
+    ("iss", "Emisor", "Quién creó el token: el backend de Ideator. El backend rechaza tokens de otro emisor."),
+    ("aud", "Audiencia", "Para quién es el token: la app web de Ideator. Un token hecho para otra app no sirve aquí."),
+    ("sub", "Usuario (sujeto)", "El id del usuario en la tabla users. Con este id el backend sabe quién hace cada llamada."),
+    ("name", "Nombre", "El nombre del usuario, solo para que el token se lea fácil. Los permisos no dependen de esto."),
+    ("email", "Correo", "El correo del usuario, también solo para leerlo. El correo real se consulta en la base de datos."),
+    ("iat", "Emitido", "Cuándo se creó el token, en segundos desde el 1 de enero de 1970 (UTC)."),
+    ("exp", "Vence", "Cuándo deja de servir el token, en el mismo formato. Después de esa hora el backend responde 401."),
+    ("jti", "Id de la sesión", "Un id único y aleatorio de este token. Al cerrar sesión se guarda en la tabla revoked_tokens y el token deja de servir."),
+    ("type", "Tipo", "Para qué es el token: access significa sesión de usuario."),
+]
+
+
+@router.get("/session")
+def session_info(
+    request: Request,
+    user: User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Muestra el token de la sesión actual decodificado y explicado (sin devolver el token mismo)."""
+    claims = decode_access_token(extract_token(request, settings) or "", settings).raw
+    return {
+        "storage": {
+            "where": "cookie",
+            "cookie_name": settings.session_cookie_name,
+            "http_only": True,
+            "same_site": "lax",
+            "secure": settings.cookie_secure,
+            "max_age_seconds": settings.access_token_minutes * 60,
+        },
+        "header": {"alg": JWT_ALGORITHM, "typ": "JWT"},
+        "signature": "HMAC con SHA-256 usando SECRET_KEY, que solo existe en el backend (backend/.env).",
+        "claims": claims,
+        "fields": [
+            {"claim": key, "label": label, "meaning": meaning, "value": claims.get(key)}
+            for key, label, meaning in CLAIM_INFO
+        ],
+        "user": {"id": str(user.id), "name": user.name, "email": user.email},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -243,5 +299,5 @@ async def sso_callback(provider: str, request: Request, settings: Settings = Dep
     except SsoLinkError as exc:
         return RedirectResponse(f"{login_url}?error={exc.code}", status_code=302)
     response = RedirectResponse(f"{settings.frontend_url.rstrip('/')}/", status_code=302)
-    set_session_cookie(response, create_access_token(user.id, settings), settings)
+    set_session_cookie(response, create_access_token(user, settings), settings)
     return response

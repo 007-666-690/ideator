@@ -24,19 +24,33 @@ def test_password_hashing():
 
 
 def test_jwt_roundtrip_and_errors():
-    uid = uuid.uuid4()
-    token = create_access_token(uid, SETTINGS)
-    assert decode_access_token(token, SETTINGS) == uid
+    user = SimpleNamespace(id=uuid.uuid4(), name="Cristiano Hola", email="cristiano@example.com")
+    token = create_access_token(user, SETTINGS)
+    claims = decode_access_token(token, SETTINGS)
+    assert claims.user_id == user.id
+    # Campos estándar más dos legibles; el token se lee sin la clave, pero no se puede cambiar
+    raw = jwt.decode(token, options={"verify_signature": False})
+    assert raw["iss"] == "ideator" and raw["aud"] == "ideator-web" and raw["type"] == "access"
+    assert raw["sub"] == str(user.id) and raw["name"] == "Cristiano Hola" and raw["email"] == "cristiano@example.com"
+    assert raw["exp"] - raw["iat"] == SETTINGS.access_token_minutes * 60
+    assert uuid.UUID(raw["jti"]) and raw["jti"] != decode_access_token(create_access_token(user, SETTINGS), SETTINGS).jti
     with pytest.raises(ApiError) as exc:
         decode_access_token(token + "x", SETTINGS)
     assert exc.value.status == 401
-    expired = jwt.encode({"sub": str(uid), "exp": 1, "typ": "access"}, SETTINGS.secret_key, algorithm="HS256")
+    base = {"iss": "ideator", "aud": "ideator-web", "sub": str(user.id), "iat": 1, "jti": "j", "type": "access"}
+    expired = jwt.encode({**base, "exp": 1}, SETTINGS.secret_key, algorithm="HS256")
     with pytest.raises(ApiError) as exc:
         decode_access_token(expired, SETTINGS)
     assert exc.value.code == "session_expired"
-    other = jwt.encode({"sub": str(uid), "exp": 9999999999, "typ": "refresh"}, SETTINGS.secret_key, algorithm="HS256")
-    with pytest.raises(ApiError):
-        decode_access_token(other, SETTINGS)
+    for bad in ({"type": "refresh"}, {"aud": "otra-app"}, {"iss": "otro"}):
+        forged = jwt.encode({**base, "exp": 9999999999, **bad}, SETTINGS.secret_key, algorithm="HS256")
+        with pytest.raises(ApiError):
+            decode_access_token(forged, SETTINGS)
+    # Cambiar el sub sin la clave rompe la firma
+    tampered = jwt.encode({**raw, "sub": str(uuid.uuid4())}, "otra-clave-cualquiera-de-40-caracteres!!", algorithm="HS256")
+    with pytest.raises(ApiError) as exc:
+        decode_access_token(tampered, SETTINGS)
+    assert exc.value.code == "invalid_token"
 
 
 def test_login_throttle():

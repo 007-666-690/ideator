@@ -19,12 +19,12 @@ from sqlalchemy.orm import Session
 from .config import Settings, get_settings
 from .db import get_db
 from .errors import ApiError
-from .models import ROLE_RANK, Project, ProjectMember, User
+from .models import ROLE_RANK, Project, ProjectMember, RevokedToken, User
 from .observability import set_current_user
 from .security import decode_access_token
 
 
-def _extract_token(request: Request, settings: Settings) -> str | None:
+def extract_token(request: Request, settings: Settings) -> str | None:
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip() or None
@@ -36,11 +36,13 @@ def get_current_user(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> User:
-    token = _extract_token(request, settings)
+    token = extract_token(request, settings)
     if not token:
         raise ApiError(401, "not_authenticated", "Debes iniciar sesión.")
-    user_id = decode_access_token(token, settings)
-    user = db.get(User, user_id)
+    claims = decode_access_token(token, settings)
+    if db.get(RevokedToken, claims.jti) is not None:
+        raise ApiError(401, "session_revoked", "Esta sesión fue cerrada. Vuelve a iniciar sesión.")
+    user = db.get(User, claims.user_id)
     if user is None:
         raise ApiError(401, "invalid_token", "Sesión inválida. Vuelve a iniciar sesión.")
     set_current_user(str(user.id))

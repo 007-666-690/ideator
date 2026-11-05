@@ -25,9 +25,9 @@ export default function TopBar({ children }: { children?: ReactNode }) {
       <span className="spacer" />
       {user && (
         <span className="row">
-          <span className="small muted" title={user.email}>
+          <Link to="/sesion" className="small muted session-link" title={`${user.email}: ver mi sesión`}>
             {user.name}
-          </span>
+          </Link>
           <button
             className="btn ghost small"
             onClick={async () => {

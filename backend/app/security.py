@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -15,6 +16,7 @@ from fastapi import Response
 
 from .config import Settings
 from .errors import ApiError
+from .models import User
 
 _hasher = PasswordHasher()
 JWT_ALGORITHM = "HS256"
@@ -33,30 +35,59 @@ def verify_password(password_hash: str | None, password: str) -> bool:
         return False
 
 
-def create_access_token(user_id: uuid.UUID, settings: Settings) -> str:
+# El token de sesión es un JWT FIRMADO (HS256 con SECRET_KEY), no cifrado: cualquiera que lo
+# tenga puede leer su contenido (por ejemplo en jwt.io), pero nadie puede cambiarlo sin que la
+# firma deje de calzar. Por eso solo lleva datos que el mismo usuario ya conoce.
+TOKEN_ISSUER = "ideator"  # iss: quién emitió el token (el backend de Ideator)
+TOKEN_AUDIENCE = "ideator-web"  # aud: para quién es (la app web de Ideator)
+TOKEN_TYPE = "access"  # type: token de sesión (no de invitación ni de otro uso)
+
+
+def create_access_token(user: User, settings: Settings) -> str:
     now = datetime.now(timezone.utc)
     payload = {
-        "sub": str(user_id),
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=settings.access_token_minutes)).timestamp()),
-        "typ": "access",
+        "iss": TOKEN_ISSUER,
+        "aud": TOKEN_AUDIENCE,
+        "sub": str(user.id),  # id del usuario en la tabla users
+        "name": user.name,
+        "email": user.email,
+        "iat": int(now.timestamp()),  # emitido (segundos desde 1970, UTC)
+        "exp": int((now + timedelta(minutes=settings.access_token_minutes)).timestamp()),  # vence
+        "jti": str(uuid.uuid4()),  # id único de esta sesión; al cerrar sesión se revoca
+        "type": TOKEN_TYPE,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=JWT_ALGORITHM)
 
 
-def decode_access_token(token: str, settings: Settings) -> uuid.UUID:
+@dataclass
+class TokenClaims:
+    user_id: uuid.UUID
+    jti: str
+    expires_at: datetime
+    raw: dict
+
+
+def decode_access_token(token: str, settings: Settings) -> TokenClaims:
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[JWT_ALGORITHM], options={"require": ["exp", "sub"]})
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[JWT_ALGORITHM],
+            audience=TOKEN_AUDIENCE,
+            issuer=TOKEN_ISSUER,
+            options={"require": ["iss", "aud", "sub", "iat", "exp", "jti"]},
+        )
     except jwt.ExpiredSignatureError as exc:
         raise ApiError(401, "session_expired", "Tu sesión expiró. Vuelve a iniciar sesión.") from exc
     except jwt.PyJWTError as exc:
         raise ApiError(401, "invalid_token", "Sesión inválida. Vuelve a iniciar sesión.") from exc
-    if payload.get("typ") != "access":
+    if payload.get("type") != TOKEN_TYPE:
         raise ApiError(401, "invalid_token", "Sesión inválida. Vuelve a iniciar sesión.")
     try:
-        return uuid.UUID(payload["sub"])
+        user_id = uuid.UUID(payload["sub"])
     except (ValueError, TypeError) as exc:
         raise ApiError(401, "invalid_token", "Sesión inválida. Vuelve a iniciar sesión.") from exc
+    return TokenClaims(user_id=user_id, jti=str(payload["jti"]), expires_at=datetime.fromtimestamp(payload["exp"], timezone.utc), raw=payload)
 
 
 def set_session_cookie(response: Response, token: str, settings: Settings) -> None:

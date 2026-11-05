@@ -167,6 +167,21 @@ class StageApproval(Base):
     user: Mapped[User] = relationship()
 
 
+class RevokedToken(Base):
+    """Sesiones cerradas antes de vencer: el jti del token queda aquí hasta su fecha de vencimiento.
+
+    Un JWT sigue siendo válido hasta su exp aunque se borre la cookie; guardando su jti al cerrar
+    sesión, el backend lo rechaza aunque alguien haya copiado el token.
+    """
+
+    __tablename__ = "revoked_tokens"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class StageRevision(Base):
     """Historial de versiones de cada etapa: quién cambió qué y cuándo."""
 

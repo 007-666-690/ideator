@@ -14,6 +14,15 @@ import type {
   SyncState,
 } from "./types";
 
+export interface SessionInfo {
+  storage: { where: string; cookie_name: string; http_only: boolean; same_site: string; secure: boolean; max_age_seconds: number };
+  header: { alg: string; typ: string };
+  signature: string;
+  claims: Record<string, unknown>;
+  fields: { claim: string; label: string; meaning: string; value: unknown }[];
+  user: { id: string; name: string; email: string };
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -76,6 +85,7 @@ export const api = {
   register: (name: string, email: string, password: string) => post<Me>("/api/auth/register", { name, email, password }),
   logout: () => post<void>("/api/auth/logout"),
   providers: () => get<{ id: string; name: string; enabled: boolean }[]>("/api/auth/providers"),
+  session: () => get<SessionInfo>("/api/auth/session"),
 
   // Proyectos
   projects: () => get<ProjectListItem[]>("/api/projects"),

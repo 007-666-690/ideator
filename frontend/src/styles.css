@@ -420,3 +420,24 @@ table.data tr:last-child td { border-bottom: 0; }
 .approvals li.ok span:nth-child(2) { font-weight: 600; }
 .approvals li.ok .avatar { outline: 2px solid var(--stamp); outline-offset: 1px; }
 .export-stage { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--rule); margin-top: 14px; padding-top: 12px; }
+
+/* Mi sesión */
+.session-link { text-decoration: none; }
+.session-link:hover { color: var(--cobalt); text-decoration: underline; }
+.session-page section { margin-top: 36px; }
+.session-page .lead { max-width: 68ch; font-size: 17px; }
+.session-page h2 { font-size: 21px; }
+.jwt-shape { font-size: 20px; margin: 8px 0 16px; letter-spacing: 0.01em; }
+.jwt-h { color: #c5221f; }
+.jwt-p { color: #7b3fc4; }
+.jwt-s { color: #0b7a8a; }
+.jwt-legend { display: grid; gap: 10px; margin: 0; max-width: 72ch; }
+.jwt-legend div { display: grid; grid-template-columns: 110px 1fr; gap: 12px; }
+.jwt-legend dt { font-weight: 650; }
+.jwt-legend dd { margin: 0; }
+.session-page .note { background: var(--highlight-soft); border-left: 3px solid var(--highlight); padding: 10px 14px; border-radius: 0 var(--radius-s) var(--radius-s) 0; max-width: 68ch; margin-top: 16px; }
+.claim-value { word-break: break-all; }
+.session-page table.data td:first-child { white-space: nowrap; }
+.session-page .steps { max-width: 72ch; padding-left: 22px; }
+.session-page .steps li { margin-bottom: 10px; }
+@media (max-width: 640px) { .jwt-legend div { grid-template-columns: 1fr; gap: 2px; } }

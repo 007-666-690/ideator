@@ -77,3 +77,23 @@ def test_health_ready_metrics(client):
     assert r.status_code == 200
     assert "ideator_http_requests_total" in r.text
     assert "x-request-id" in {k.lower() for k in client.get("/api/health").headers}
+
+
+def test_session_explained_and_logout_revokes_copied_token(client):
+    register(client, name="Cristiano Hola", email="cristiano@test.cl")
+    token = client.cookies.get("ideator_session")
+    r = client.get("/api/auth/session")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["storage"]["cookie_name"] == "ideator_session" and data["storage"]["http_only"] is True
+    assert data["claims"]["name"] == "Cristiano Hola" and data["claims"]["sub"] == data["user"]["id"]
+    assert [f["claim"] for f in data["fields"]] == ["iss", "aud", "sub", "name", "email", "iat", "exp", "jti", "type"]
+    assert token not in r.text  # el token mismo nunca se devuelve (la cookie es HttpOnly)
+
+    # Alguien copia el token desde DevTools; después el usuario cierra sesión
+    assert client.post("/api/auth/logout").status_code == 204
+    client.cookies.clear()
+    r = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "session_revoked"
+    assert client.get("/api/auth/session").status_code == 401
