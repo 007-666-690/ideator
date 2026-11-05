@@ -1,7 +1,7 @@
 """Colaboración: versiones, conflictos y fallas del modelo de IA."""
 
 from app.ideator.llm import LLMUnavailable, set_llm
-from tests.conftest import complete_product, create_project, register, stage
+from tests.conftest import approve, complete_product, create_project, register, stage
 
 
 def _team(make_client):
@@ -17,6 +17,7 @@ def _team(make_client):
 def test_stale_version_conflict(make_client):
     a, b, pid = _team(make_client)
     complete_product(a, pid)
+    approve(b, pid, "product")  # en equipo, aprueban todos los que editan
     s = stage(a, pid, "data_model")
     version = s["version"]
     # Ana genera; Beto intenta guardar con la versión vieja
@@ -36,8 +37,9 @@ def test_stale_version_conflict(make_client):
 
 
 def test_approved_stage_is_read_only(make_client):
-    a, _b, pid = _team(make_client)
+    a, b, pid = _team(make_client)
     complete_product(a, pid)
+    approve(b, pid, "product")
     s = stage(a, pid, "product")
     r = a.put(f"/api/projects/{pid}/stages/product", json={"version": s["version"], "brief": s["content"]["brief"]})
     assert r.status_code == 409

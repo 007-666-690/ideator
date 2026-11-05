@@ -33,15 +33,17 @@ from ..models import (
     Document,
     Message,
     Project,
+    ProjectMember,
     Question,
     Stage,
+    StageApproval,
     StageRevision,
     User,
     utcnow,
 )
 from . import prompts
 from .architectures import ARCHITECTURE_IDS, BASE_ARCHITECTURES, get_architecture
-from .documents import ARCHITECTURE_FILENAME, PRODUCT_FILENAME, architecture_markdown, product_spec_markdown
+from .documents import ARCHITECTURE_FILENAME, PRODUCT_FILENAME, architecture_markdown, product_spec_markdown, stage_markdown
 from .llm import LLMClient, LLMError
 from .render import ddl, mermaid_er, navigation_map
 from .schemas import (
@@ -348,6 +350,7 @@ def stage_view(db: Session, project: Project, stages: dict[str, Stage], kind: st
         "can_approve": stage.status in (STAGE_IN_PROGRESS, STAGE_STALE)
         and all(stages[u].status == STAGE_APPROVED for u in UPSTREAM[kind])
         and not has_errors(issues),
+        "approvals": approvals_view(db, project, stage),
         **extra,
     }
 
@@ -793,7 +796,40 @@ def architecture_generate(db: Session, llm: LLMClient, project: Project, user: U
 # ---------------------------------------------------------------------------
 
 
+def required_approvers(db: Session, project: Project) -> list[ProjectMember]:
+    """Integrantes que deben aprobar cada etapa: el dueño y los editores (los lectores no aprueban)."""
+    members = db.scalars(select(ProjectMember).where(ProjectMember.project_id == project.id)).all()
+    return sorted((m for m in members if m.role in ("owner", "editor")), key=lambda m: (m.role != "owner", m.created_at))
+
+
+def current_approvals(db: Session, stage: Stage) -> list[StageApproval]:
+    """Aprobaciones que cuentan: solo las de la versión vigente de la etapa."""
+    return list(
+        db.scalars(
+            select(StageApproval).where(StageApproval.stage_id == stage.id, StageApproval.version == stage.version).order_by(StageApproval.created_at)
+        ).all()
+    )
+
+
+def approvals_view(db: Session, project: Project, stage: Stage) -> dict[str, Any]:
+    required = required_approvers(db, project)
+    done = {a.user_id: a for a in current_approvals(db, stage)}
+    people = [
+        {"user": user_ref(m.user), "role": m.role, "approved": m.user_id in done, "approved_at": iso(done[m.user_id].created_at) if m.user_id in done else None}
+        for m in required
+    ]
+    return {"required": len(people), "count": sum(p["approved"] for p in people), "people": people}
+
+
+def clear_approvals(db: Session, stages: list[Stage]) -> None:
+    ids = [s.id for s in stages]
+    if ids:
+        for a in db.scalars(select(StageApproval).where(StageApproval.stage_id.in_(ids))).all():
+            db.delete(a)
+
+
 def approve_stage(db: Session, project: Project, user: User, kind: str, version: int) -> None:
+    """Registra la aprobación del usuario. La etapa se aprueba cuando aprueban todos los que pueden editar."""
     stages = stages_by_kind(db, project.id)
     stage = stages.get(kind) or get_stage(db, project.id, kind)
     check_version(stage, version)
@@ -808,6 +844,28 @@ def approve_stage(db: Session, project: Project, user: User, kind: str, version:
     errors = [i for i in issues if i["severity"] == "error"]
     if errors:
         raise ApiError(409, "stage_not_ready", "La etapa tiene problemas que impiden aprobarla.", {"issues": errors})
+
+    mine = db.scalar(select(StageApproval).where(StageApproval.stage_id == stage.id, StageApproval.user_id == user.id))
+    if mine is not None and mine.version == stage.version:
+        raise ApiError(409, "already_approved_by_you", "Ya aprobaste esta versión. Falta que aprueben los demás integrantes.")
+    if mine is None:
+        db.add(StageApproval(stage_id=stage.id, user_id=user.id, version=stage.version))
+    else:
+        # Aprobó una versión anterior: su aprobación pasa a la versión vigente.
+        mine.version = stage.version
+        mine.created_at = utcnow()
+    db.flush()
+
+    required = {m.user_id for m in required_approvers(db, project)}
+    approved = {a.user_id for a in current_approvals(db, stage)}
+    pending = required - approved
+    log_activity(
+        db, project.id, user, "stage.approval_added", {"kind": kind, "version": stage.version, "count": len(required & approved), "required": len(required)}
+    )
+    if pending:
+        db.commit()
+        return
+
     stage.status = STAGE_APPROVED
     stage.approved_by = user.id
     stage.approved_at = utcnow()
@@ -817,7 +875,20 @@ def approve_stage(db: Session, project: Project, user: User, kind: str, version:
         nxt = stages[STAGE_KINDS[idx + 1]]
         if nxt.status == STAGE_LOCKED:
             nxt.status = STAGE_IN_PROGRESS
-    log_activity(db, project.id, user, "stage.approved", {"kind": kind, "version": stage.version})
+    log_activity(db, project.id, user, "stage.approved", {"kind": kind, "version": stage.version, "approvers": len(required)})
+    db.commit()
+
+
+def withdraw_approval(db: Session, project: Project, user: User, kind: str) -> None:
+    """El usuario retira su aprobación de una etapa que todavía no está aprobada por todos."""
+    stage = get_stage(db, project.id, kind)
+    if stage.status == STAGE_APPROVED:
+        raise ApiError(409, "already_approved", "La etapa ya quedó aprobada por todos. Para cambiarla hay que reabrirla.")
+    mine = db.scalar(select(StageApproval).where(StageApproval.stage_id == stage.id, StageApproval.user_id == user.id))
+    if mine is None or mine.version != stage.version:
+        raise ApiError(409, "not_approved_by_you", "No tienes una aprobación vigente en esta etapa.")
+    db.delete(mine)
+    log_activity(db, project.id, user, "stage.approval_withdrawn", {"kind": kind, "version": stage.version})
     db.commit()
 
 
@@ -834,6 +905,8 @@ def reopen_stage(db: Session, project: Project, user: User, kind: str, version: 
         if s.status in (STAGE_APPROVED, STAGE_IN_PROGRESS):
             s.status = STAGE_STALE
             stale.append(downstream)
+    # Al reabrir, todos tienen que volver a aprobar esta etapa y las que quedaron por revisar.
+    clear_approvals(db, [stage] + [stages[k] for k in stale])
     log_activity(db, project.id, user, "stage.reopened", {"kind": kind, "stale": stale})
     db.commit()
     return stale
@@ -990,3 +1063,39 @@ def generate_documents(db: Session, project: Project, user: User) -> list[Docume
     log_activity(db, project.id, user, "documents.generated", {"version": version})
     db.commit()
     return docs
+
+
+EXPORT_FILENAMES = {
+    "product": "1-definicion-producto.md",
+    "data_model": "2-modelo-datos.md",
+    "api": "3-backend-api.md",
+    "frontend": "4-pantallas.md",
+    "architecture": "5-arquitectura.md",
+}
+
+
+def export_stage(db: Session, project: Project, kind: str) -> dict[str, Any]:
+    """Markdown de una etapa para copiarlo a otra IA («Copiar para la IA»)."""
+    if kind not in EXPORT_FILENAMES:
+        raise ApiError(404, "stage_not_found", "Esta etapa no se exporta por separado.")
+    stages = stages_by_kind(db, project.id)
+    stage = stages[kind]
+    if stage.status == STAGE_LOCKED:
+        raise ApiError(409, "stage_locked", f"«{STAGE_LABELS[kind]}» todavía no está habilitada.")
+    up = _upstream_artifacts(stages)
+    try:
+        content = stage_markdown(
+            kind=kind,
+            project_name=project.name,
+            brief=up["brief"],
+            model=up["model"],
+            api=up["api"],
+            fe=up["frontend"],
+            spec=data_of(stages["architecture"], ArchitectureSpec),
+            evaluation=evaluation_of(stages["architecture"]),
+            version=stage.version,
+            generated_at=utcnow(),
+        )
+    except ValueError as exc:
+        raise ApiError(409, "nothing_to_export", str(exc)) from exc
+    return {"kind": kind, "filename": EXPORT_FILENAMES[kind], "version": stage.version, "status": stage.status, "content": content}

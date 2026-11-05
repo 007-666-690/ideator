@@ -330,6 +330,12 @@ export interface Finding {
   resolved_by: string | null;
 }
 
+export interface StageApprovals {
+  required: number;
+  count: number;
+  people: { user: UserRef; role: Role; approved: boolean; approved_at: string | null }[];
+}
+
 export interface StageView {
   kind: StageKind;
   label: string;
@@ -344,6 +350,7 @@ export interface StageView {
   content: any;
   issues: Issue[];
   can_approve: boolean;
+  approvals: StageApprovals;
   my_role: Role;
   // producto
   checklist?: ChecklistItem[];

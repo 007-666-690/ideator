@@ -79,7 +79,7 @@ export const api = {
 
   // Proyectos
   projects: () => get<ProjectListItem[]>("/api/projects"),
-  createProject: (name: string, idea: string) => post<Project>("/api/projects", { name, idea }),
+  createProject: (name: string, idea: string, team_emails: string[] = []) => post<Project>("/api/projects", { name, idea, team_emails }),
   project: (id: string) => get<Project>(p(id)),
   updateProject: (id: string, data: { name?: string; idea?: string }) => patch<Project>(p(id), data),
   deleteProject: (id: string) => del<void>(p(id)),
@@ -111,6 +111,9 @@ export const api = {
     put<StageView>(`${p(id)}/stages/${kind}`, { version, data, summary: summary ?? null } as Json),
   approve: (id: string, kind: StageKind, version: number) => post<StageView>(`${p(id)}/stages/${kind}/approve`, { version }),
   reopen: (id: string, kind: StageKind, version: number) => post<StageView>(`${p(id)}/stages/${kind}/reopen`, { version }),
+  withdrawApproval: (id: string, kind: StageKind) => del<StageView>(`${p(id)}/stages/${kind}/approval`),
+  stageMarkdown: (id: string, kind: StageKind) =>
+    get<{ kind: StageKind; filename: string; version: number; status: string; content: string }>(`${p(id)}/stages/${kind}/markdown`),
   architectures: () => get<Scenario[]>("/api/architectures"),
   evaluateArchitecture: (id: string, version: number) => post<StageView>(`${p(id)}/architecture/evaluate`, { version }),
   selectArchitecture: (id: string, version: number, scenarioId: string) =>

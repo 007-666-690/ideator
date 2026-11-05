@@ -220,6 +220,19 @@ def approve(kind: str, body: VersionIn, access: ProjectAccess = Depends(editor_a
     return full_stage(db, access, kind)
 
 
+@router.get("/projects/{project_id}/stages/{kind}/markdown")
+def stage_markdown_export(kind: str, access: ProjectAccess = Depends(viewer_access), db: Session = Depends(get_db)) -> dict[str, Any]:
+    return engine.export_stage(db, access.project, kind)
+
+
+@router.delete("/projects/{project_id}/stages/{kind}/approval")
+def withdraw_approval(kind: str, access: ProjectAccess = Depends(editor_access), db: Session = Depends(get_db)) -> dict[str, Any]:
+    if kind not in STAGE_KINDS:
+        raise ApiError(404, "stage_not_found", f"La etapa '{kind}' no existe.")
+    engine.withdraw_approval(db, access.project, access.user, kind)
+    return full_stage(db, access, kind)
+
+
 @router.post("/projects/{project_id}/stages/{kind}/reopen")
 def reopen(kind: str, body: VersionIn, access: ProjectAccess = Depends(editor_access), db: Session = Depends(get_db)) -> dict[str, Any]:
     if kind not in STAGE_KINDS:

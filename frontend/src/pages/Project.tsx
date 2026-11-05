@@ -310,7 +310,18 @@ export default function ProjectPage() {
 
 function StageStatusBox({ ctx }: { ctx: StageCtx }) {
   const { view, editable, run, project, working } = ctx;
+  const { user } = useAuth();
   const errors = view.issues.filter((i) => i.severity === "error").length;
+  const team = view.approvals;
+  const mine = team?.people.find((p) => p.user.id === user?.id)?.approved ?? false;
+  const pending = team ? team.people.filter((p) => !p.approved).map((p) => p.user.name.split(" ")[0]) : [];
+  const open = view.status === "in_progress" || view.status === "stale";
+  const approveLabel = !team || team.required <= 1 ? "Aprobar etapa" : `Aprobar (${team.count} de ${team.required})`;
+  const afterApprove = () =>
+    run(
+      () => api.approve(project.id, view.kind, view.version),
+      !team || team.count + 1 >= team.required ? "Etapa aprobada." : "Tu aprobación quedó registrada. Falta que aprueben los demás.",
+    );
   return (
     <div className="box">
       <div className="row between" style={{ marginBottom: 8 }}>
@@ -326,14 +337,30 @@ function StageStatusBox({ ctx }: { ctx: StageCtx }) {
       <p className="small muted">
         Versión {view.version}
         {view.updated_by ? `, editada por ${view.updated_by.name} ${timeAgo(view.updated_at)}` : ""}.
-        {view.status === "approved" && view.approved_by ? ` Aprobada por ${view.approved_by.name}.` : ""}
+        {view.status === "approved" && view.approved_by ? ` Aprobada por ${team && team.required > 1 ? "todo el equipo" : view.approved_by.name}.` : ""}
       </p>
+      {team && team.required > 1 && view.status !== "locked" && (
+        <div className="approvals" aria-label="Aprobaciones del equipo">
+          <p className="small" style={{ margin: "0 0 6px" }}>
+            <strong>Aprobación del equipo:</strong> {team.count} de {team.required}
+          </p>
+          <ul>
+            {team.people.map((p) => (
+              <li key={p.user.id} className={p.approved ? "ok" : ""}>
+                <Avatar name={p.user.name} />
+                <span>{p.user.name}</span>
+                <span className="small muted">{p.approved ? `aprobó ${timeAgo(p.approved_at)}` : "pendiente"}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {view.status === "stale" && <p className="small">Una etapa anterior cambió. Revisa esta etapa y vuelve a aprobarla.</p>}
       {view.status === "locked" && <p className="small">Se habilita cuando se aprueba la etapa anterior.</p>}
-      {editable && (view.status === "in_progress" || view.status === "stale") && (
+      {editable && open && !mine && (
         <>
-          <button className="btn approve" disabled={!view.can_approve || working} onClick={() => run(() => api.approve(project.id, view.kind, view.version), "Etapa aprobada.")}>
-            Aprobar etapa
+          <button className="btn approve" disabled={!view.can_approve || working} onClick={afterApprove}>
+            {approveLabel}
           </button>
           {!view.can_approve && (
             <p className="small muted" style={{ marginTop: 8, marginBottom: 0 }}>
@@ -342,16 +369,79 @@ function StageStatusBox({ ctx }: { ctx: StageCtx }) {
           )}
         </>
       )}
+      {editable && open && mine && (
+        <>
+          <p className="small" style={{ marginTop: 0 }}>
+            Ya aprobaste esta versión. Falta que {pending.length === 1 ? "apruebe" : "aprueben"} {pending.join(", ")}. Si alguien cambia la etapa, hay que volver a aprobarla.
+          </p>
+          <button className="btn ghost small" disabled={working} onClick={() => run(() => api.withdrawApproval(project.id, view.kind), "Retiraste tu aprobación.")}>
+            Retirar mi aprobación
+          </button>
+        </>
+      )}
       {editable && view.status === "approved" && (
         <ConfirmButton
           label="Reabrir para editar"
           confirmLabel="Sí, reabrir"
-          question="Las etapas siguientes quedarán por revisar."
+          question={team && team.required > 1 ? "Las etapas siguientes quedarán por revisar y todos tendrán que volver a aprobar." : "Las etapas siguientes quedarán por revisar."}
           onConfirm={() => run(() => api.reopen(project.id, view.kind, view.version), "Etapa reabierta.")}
           disabled={working}
         />
       )}
-      {!editable && <p className="small muted">Tienes rol de lector: puedes ver todo, pero no modificar.</p>}
+      {!editable && <p className="small muted">Tienes rol de lector: puedes ver todo, pero no modificar ni aprobar.</p>}
+      {view.kind !== "review" && view.status !== "locked" && <ExportStage projectId={project.id} kind={view.kind} />}
+    </div>
+  );
+}
+
+function ExportStage({ projectId, kind }: { projectId: string; kind: StageKind }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const fetchDoc = async () => {
+    setBusy(true);
+    try {
+      return await api.stageMarkdown(projectId, kind);
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "No se pudo exportar la etapa.", "error");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const download = (filename: string, content: string) => {
+    const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const copy = async () => {
+    const doc = await fetchDoc();
+    if (!doc) return;
+    try {
+      await navigator.clipboard.writeText(doc.content);
+      toast(doc.status === "approved" ? "Etapa copiada en Markdown. Pégala en la IA que quieras." : "Copiada en Markdown. Ojo: la etapa todavía no está aprobada.");
+    } catch {
+      download(doc.filename, doc.content);
+      toast("Tu navegador no permitió copiar: se descargó el archivo .md.");
+    }
+  };
+  return (
+    <div className="export-stage">
+      <button className="btn secondary small" disabled={busy} onClick={copy}>
+        Copiar para la IA
+      </button>
+      <button
+        className="btn ghost small"
+        disabled={busy}
+        onClick={async () => {
+          const doc = await fetchDoc();
+          if (doc) download(doc.filename, doc.content);
+        }}
+      >
+        Descargar .md
+      </button>
     </div>
   );
 }

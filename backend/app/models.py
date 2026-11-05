@@ -147,6 +147,26 @@ class Stage(Base):
     approver: Mapped[User | None] = relationship(foreign_keys=[approved_by])
 
 
+class StageApproval(Base):
+    """Aprobación de un integrante sobre una versión de una etapa.
+
+    Una etapa queda aprobada cuando aprueban todos los integrantes con permiso de edición
+    (dueño y editores) la misma versión. Si el contenido cambia, las aprobaciones de la
+    versión anterior dejan de contar.
+    """
+
+    __tablename__ = "stage_approvals"
+    __table_args__ = (UniqueConstraint("stage_id", "user_id", name="uq_stage_approval_user"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    stage_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stages.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user: Mapped[User] = relationship()
+
+
 class StageRevision(Base):
     """Historial de versiones de cada etapa: quién cambió qué y cuándo."""
 

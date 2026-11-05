@@ -89,28 +89,38 @@ def product_spec_markdown(
     *,
     project_name: str,
     brief: ProductBrief,
-    model: DataModel,
-    api: ApiSpec,
-    fe: FrontendSpec,
+    model: DataModel | None,
+    api: ApiSpec | None,
+    fe: FrontendSpec | None,
     version: int,
     generated_at: datetime,
+    stage_only: bool = False,
 ) -> str:
+    """Especificación del producto. Con stage_only=True genera solo lo de la etapa 1 (sin §9–11)."""
     names = _user_names(brief)
-    req_eps, req_screens = _req_links(api, fe)
+    req_eps, req_screens = _req_links(api, fe) if api is not None and fe is not None else ({}, {})
     step_screens: dict[int, list[str]] = {}
-    for s in fe.screens:
+    for s in fe.screens if fe is not None else []:
         for n in s.journey_steps:
             step_screens.setdefault(n, []).append(s.id)
 
     out: list[str] = []
     w = out.append
-    w(f"# {brief.product_name or project_name} — Especificación de producto (MVP)")
-    w("")
-    w(
-        f"> Generado por Ideator el {generated_at:%Y-%m-%d %H:%M} UTC · Proyecto «{project_name}» · Versión {version}.  \n"
-        "> Este documento y `arquitectura.md` son la única fuente de verdad del producto. "
-        "Lo que no aparece aquí no forma parte del MVP."
-    )
+    if stage_only:
+        w(f"# {brief.product_name or project_name} — Definición del producto")
+        w("")
+        w(
+            f"> Exportado desde Ideator el {generated_at:%Y-%m-%d %H:%M} UTC · Proyecto «{project_name}» · Etapa 1, versión {version}.  \n"
+            "> Es la definición aprobada del producto. El modelo de datos, la API y las pantallas se definen en las etapas siguientes."
+        )
+    else:
+        w(f"# {brief.product_name or project_name} — Especificación de producto (MVP)")
+        w("")
+        w(
+            f"> Generado por Ideator el {generated_at:%Y-%m-%d %H:%M} UTC · Proyecto «{project_name}» · Versión {version}.  \n"
+            "> Este documento y `arquitectura.md` son la única fuente de verdad del producto. "
+            "Lo que no aparece aquí no forma parte del MVP."
+        )
     w("")
     w("## 0. Instrucciones para la IA que implementa")
     w("")
@@ -171,8 +181,9 @@ def product_spec_markdown(
         w("")
         w(f"- **Prioridad:** {PRIORITY.get(r.priority, r.priority)}")
         w(f"- **Usuarios:** {_roles_text(r.user_types, names)}")
-        w(f"- **Endpoints:** {', '.join(req_eps.get(r.id, [])) or '—'}")
-        w(f"- **Pantallas:** {', '.join(req_screens.get(r.id, [])) or '—'}")
+        if not stage_only:
+            w(f"- **Endpoints:** {', '.join(req_eps.get(r.id, [])) or '—'}")
+            w(f"- **Pantallas:** {', '.join(req_screens.get(r.id, [])) or '—'}")
         w("")
         w("**Criterios de aceptación**")
         w("")
@@ -207,9 +218,12 @@ def product_spec_markdown(
         )
     )
     w("")
-    out.extend(_data_model_section(model))
-    out.extend(_api_section(api, names))
-    out.extend(_frontend_section(fe, names))
+    if model is not None:
+        out.extend(_data_model_section(model))
+    if api is not None:
+        out.extend(_api_section(api, names))
+    if fe is not None:
+        out.extend(_frontend_section(fe, names))
     w("## 12. Requisitos no funcionales y seguridad")
     w("")
     w("### Seguridad")
@@ -658,3 +672,53 @@ def architecture_markdown(
     )
     w("")
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Exportar una etapa («Copiar para la IA»)
+# ---------------------------------------------------------------------------
+
+STAGE_EXPORT_TITLES = {"data_model": "Modelo de datos", "api": "Backend y API", "frontend": "Pantallas y navegación"}
+
+
+def stage_markdown(
+    *,
+    kind: str,
+    project_name: str,
+    brief: ProductBrief,
+    model: DataModel | None = None,
+    api: ApiSpec | None = None,
+    fe: FrontendSpec | None = None,
+    spec: ArchitectureSpec | None = None,
+    evaluation: ArchitectureEvaluation | None = None,
+    version: int,
+    generated_at: datetime,
+) -> str:
+    """Markdown de una sola etapa, para copiarlo a otra IA o compartirlo con el equipo."""
+    if kind == "product":
+        return product_spec_markdown(
+            project_name=project_name, brief=brief, model=None, api=None, fe=None, version=version, generated_at=generated_at, stage_only=True
+        )
+    if kind == "architecture":
+        if spec is None or api is None:
+            raise ValueError("La arquitectura todavía no está detallada.")
+        return architecture_markdown(
+            project_name=project_name, brief=brief, api=api, spec=spec, evaluation=evaluation, version=version, generated_at=generated_at
+        )
+    names = _user_names(brief)
+    body: list[str]
+    if kind == "data_model" and model is not None:
+        body = _data_model_section(model)
+    elif kind == "api" and api is not None:
+        body = _api_section(api, names)
+    elif kind == "frontend" and fe is not None:
+        body = _frontend_section(fe, names)
+    else:
+        raise ValueError("La etapa todavía no tiene contenido para exportar.")
+    head = [
+        f"# {brief.product_name or project_name} — {STAGE_EXPORT_TITLES[kind]}",
+        "",
+        f"> Exportado desde Ideator el {generated_at:%Y-%m-%d %H:%M} UTC · Proyecto «{project_name}» · Versión {version} de la etapa.",
+        "",
+    ]
+    return "\n".join(head + body)

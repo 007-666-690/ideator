@@ -6,14 +6,14 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import ProjectAccess, editor_access, get_current_user, owner_access, viewer_access
 from ..ideator.engine import create_stages, iso, log_activity, question_counts, stage_summary, user_ref
-from ..models import STAGE_APPROVED, STAGE_KINDS, ActivityLog, Document, Project, ProjectMember, Stage, StageRevision, User
+from ..models import STAGE_APPROVED, STAGE_KINDS, ActivityLog, Document, Invitation, Project, ProjectMember, Stage, StageRevision, User
 
 router = APIRouter(prefix="/api", tags=["projects"])
 
@@ -33,7 +33,9 @@ ACTION_LABELS = {
     "question.dismissed": "descartó una pregunta",
     "stage.edited": "editó",
     "stage.generated": "generó con IA",
-    "stage.approved": "aprobó",
+    "stage.approval_added": "aprobó",
+    "stage.approval_withdrawn": "retiró su aprobación",
+    "stage.approved": "completó la aprobación del equipo",
     "stage.reopened": "reabrió",
     "architecture.evaluated": "evaluó las arquitecturas",
     "architecture.selected": "seleccionó la arquitectura",
@@ -47,6 +49,8 @@ ACTION_LABELS = {
 class ProjectIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     idea: str = Field(min_length=10, max_length=6000)
+    # Equipo desde el inicio: se invita como editores a estos correos (opcional).
+    team_emails: list[EmailStr] = Field(default_factory=list, max_length=10)
 
 
 class ProjectPatch(BaseModel):
@@ -118,6 +122,11 @@ def create_project(body: ProjectIn, user: User = Depends(get_current_user), db: 
     db.add(member)
     create_stages(db, project)
     log_activity(db, project.id, user, "project.created", {"name": project.name})
+    for email in dict.fromkeys(e.lower() for e in body.team_emails):
+        if email == user.email.lower():
+            continue
+        db.add(Invitation(project_id=project.id, email=email, role="editor", invited_by=user.id))
+        log_activity(db, project.id, user, "member.invited", {"email": email, "role": "editor"})
     db.commit()
     db.refresh(project)
     return project_view(db, project, member)

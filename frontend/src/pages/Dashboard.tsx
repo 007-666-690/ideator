@@ -11,6 +11,7 @@ export default function Dashboard() {
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [name, setName] = useState("");
   const [idea, setIdea] = useState("");
+  const [team, setTeam] = useState("");
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const navigate = useNavigate();
@@ -29,7 +30,14 @@ export default function Dashboard() {
     e.preventDefault();
     setBusy(true);
     try {
-      const project = await api.createProject(name.trim(), idea.trim());
+      const emails = team.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+      const bad = emails.filter((x) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+      if (bad.length) {
+        toast(`Revisa ${bad.length === 1 ? "este correo" : "estos correos"}: ${bad.join(", ")}`, "error");
+        return;
+      }
+      const project = await api.createProject(name.trim(), idea.trim(), emails);
+      if (emails.length) toast(`Invitaste a ${emails.length === 1 ? "1 persona" : `${emails.length} personas`} como editores.`);
       navigate(`/p/${project.id}/product`);
     } catch (err) {
       toast(err instanceof Error ? err.message : "No se pudo crear el proyecto", "error");
@@ -128,6 +136,19 @@ export default function Dashboard() {
                   rows={7}
                   placeholder="Qué problema quieres resolver, para quién y por qué ahora. No importa si está incompleta: Ideator te preguntará lo que falte."
                 />
+              </div>
+              <div className="field">
+                <label htmlFor="pteam">Equipo (opcional)</label>
+                <input
+                  id="pteam"
+                  type="text"
+                  value={team}
+                  onChange={(e) => setTeam(e.target.value)}
+                  placeholder="Correos separados por coma: tomas@uai.cl, ignacio@uai.cl"
+                />
+                <p className="small muted" style={{ margin: "6px 0 0" }}>
+                  Entran como editores y cada etapa avanza cuando aprueban todos.
+                </p>
               </div>
               <button className="btn" type="submit" disabled={busy || name.trim().length === 0 || idea.trim().length < 10}>
                 Crear proyecto

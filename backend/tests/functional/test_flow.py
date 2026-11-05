@@ -204,3 +204,25 @@ def test_change_request_to_ai_and_manual_edit(client):
     r = client.post(f"/api/projects/{pid}/stages/data_model/approve", json={"version": r.json()["version"]})
     assert r.status_code == 409
     assert r.json()["error"]["code"] == "stage_not_ready"
+
+
+def test_exportar_cada_etapa_en_markdown(client):
+    from tests.conftest import advance_to_architecture
+
+    register(client, name="Jefe", email="export@test.cl")
+    pid = create_project(client)["id"]
+    r = client.get(f"/api/projects/{pid}/stages/data_model/markdown")
+    assert r.status_code == 409  # bloqueada
+    advance_to_architecture(client, pid)
+    prod = client.get(f"/api/projects/{pid}/stages/product/markdown").json()
+    assert prod["filename"] == "1-definicion-producto.md"
+    assert "Definición del producto" in prod["content"] and "## 9. Modelo de datos" not in prod["content"]
+    dm = client.get(f"/api/projects/{pid}/stages/data_model/markdown").json()["content"]
+    assert "## 9. Modelo de datos" in dm and "CREATE TABLE" in dm
+    api_md = client.get(f"/api/projects/{pid}/stages/api/markdown").json()["content"]
+    assert "## 10. API del backend" in api_md
+    fe_md = client.get(f"/api/projects/{pid}/stages/frontend/markdown").json()["content"]
+    assert "## 11. Interfaz" in fe_md
+    r = client.get(f"/api/projects/{pid}/stages/architecture/markdown")
+    assert r.status_code == 409  # todavía sin detallar
+    assert client.get(f"/api/projects/{pid}/stages/review/markdown").status_code == 404
