@@ -376,6 +376,14 @@ def _ordered_questions(db: Session, project_id: uuid.UUID, statuses: tuple[str, 
     )
 
 
+LATE_ROUND = 5
+
+
+def max_new_questions(round_number: int) -> int:
+    """Presupuesto de preguntas: 4 en las primeras rondas, 2 desde la tercera."""
+    return MAX_NEW_QUESTIONS if round_number < 3 else 2
+
+
 def _apply_turn(
     db: Session,
     project: Project,
@@ -404,8 +412,12 @@ def _apply_turn(
     total = db.scalar(select(func.count()).select_from(Question).where(Question.project_id == project.id)) or 0
     seen = {q.text.strip().lower() for q in _ordered_questions(db, project.id, ("open",))}
     created = 0
+    limit = max_new_questions(round_number)
     for nq in sorted(turn.new_questions, key=lambda q: not q.blocking):
-        if created >= MAX_NEW_QUESTIONS or nq.text.strip().lower() in seen:
+        if created >= limit or nq.text.strip().lower() in seen:
+            continue
+        if round_number >= LATE_ROUND and not nq.blocking:
+            # En rondas tardías los detalles no bloqueantes se resuelven con supuestos, no con más preguntas.
             continue
         created += 1
         db.add(
