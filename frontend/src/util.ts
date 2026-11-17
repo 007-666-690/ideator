@@ -52,3 +52,6 @@ export function clone<T>(value: T): T {
 }
 
 export const DELEGATED = "[DELEGADO] El equipo delega esta decisión a Ideator.";
+
+// Nombre de la app (el proyecto del curso es "Ideator"; cambiar aquí si se quiere otro nombre).
+export const APP_NAME = "Plano";

@@ -93,7 +93,7 @@ export default function Dashboard() {
             <h1>Tus proyectos</h1>
             {projects === null && <p className="muted">Cargando…</p>}
             {projects?.length === 0 && (
-              <p className="muted">Todavía no tienes proyectos. Escribe tu idea a la derecha y Ideator te guiará pregunta a pregunta.</p>
+              <p className="muted">Todavía no tienes proyectos. Escribe tu idea a la derecha y Plano te guiará pregunta a pregunta.</p>
             )}
             {projects && projects.length > 0 && (
               <div className="project-list">
@@ -134,7 +134,7 @@ export default function Dashboard() {
                   minLength={10}
                   maxLength={6000}
                   rows={7}
-                  placeholder="Qué problema quieres resolver, para quién y por qué ahora. No importa si está incompleta: Ideator te preguntará lo que falte."
+                  placeholder="Qué problema quieres resolver, para quién y por qué ahora. No importa si está incompleta: Plano te preguntará lo que falte."
                 />
               </div>
               <div className="field">

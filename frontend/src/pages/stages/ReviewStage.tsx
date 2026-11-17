@@ -95,7 +95,7 @@ export default function ReviewStage({ ctx }: { ctx: StageCtx }) {
   return (
     <>
       <StageIntro title="Revisión final">
-        Antes de generar los documentos, Ideator revisa la consistencia de todo el proyecto: problemas automáticos y contradicciones entre etapas detectadas por la IA. Los hallazgos críticos impiden generar.
+        Antes de generar los documentos, Plano revisa la consistencia de todo el proyecto: problemas automáticos y contradicciones entre etapas detectadas por la IA. Los hallazgos críticos impiden generar.
       </StageIntro>
 
       <div className="box section">

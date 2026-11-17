@@ -47,7 +47,7 @@ with sync_playwright() as p:
     # Responder: opción en la primera, delegar la segunda, texto en la tercera
     q = page.locator(".question")
     q.nth(0).get_by_role("button", name="Socios y un administrador del club").click()
-    q.nth(1).get_by_role("button", name="Que decida Ideator").click()
+    q.nth(1).get_by_role("button", name="Que decida Plano").click()
     q.nth(2).locator("textarea").fill("60 minutos")
     page.get_by_role("button", name="Enviar 3 respuestas").click()
     expect(page.get_by_text("No hay preguntas pendientes")).to_be_visible(timeout=15000)
@@ -59,7 +59,7 @@ with sync_playwright() as p:
         page.get_by_role("button", name=label).click()
         expect(page.get_by_role("button", name="Aprobar etapa")).to_be_enabled(timeout=15000)
         if kind == "data_model":
-            page.wait_for_selector(".diagram svg", timeout=15000)
+            page.wait_for_selector(".entity-card", timeout=15000)
             shot(page, "05-datos-diagrama")
             page.get_by_role("tab", name="Tablas (5)").click()
             shot(page, "06-datos-tablas")
@@ -67,6 +67,9 @@ with sync_playwright() as p:
             page.get_by_role("button", name="EP-08").click()
             shot(page, "07-api")
         if kind == "frontend":
+            page.get_by_role("button", name="PA-03 Disponibilidad").click()
+            page.locator(".mk").get_by_role("button", name="Reservar bloque").click()
+            expect(page.locator(".mk-h1")).to_have_text("Confirmar reserva")
             shot(page, "08-pantallas")
             page.get_by_role("tab", name="Mapa de navegación").click()
             page.wait_for_selector(".diagram svg", timeout=15000)

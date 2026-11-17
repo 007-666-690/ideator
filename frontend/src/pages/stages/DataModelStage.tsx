@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import { ConfirmButton, Mermaid, Tabs, useToast } from "../../components/ui";
 import type { Column, DataModel, FK, Table } from "../../types";
@@ -8,6 +8,12 @@ import { ChangeRequest, GenerateFirst, JsonEditor, StageIntro } from "./common";
 
 const TYPES = ["uuid", "text", "varchar(120)", "varchar(254)", "integer", "bigint", "numeric(12,2)", "boolean", "date", "time", "timestamptz", "jsonb"];
 const ON_DELETE: FK["on_delete"][] = ["CASCADE", "RESTRICT", "SET NULL", "NO ACTION"];
+const ON_DELETE_LABEL: Record<FK["on_delete"], string> = {
+  CASCADE: "Borrar también este (CASCADE)",
+  RESTRICT: "Impedir el borrado (RESTRICT)",
+  "SET NULL": "Dejar vacío (SET NULL)",
+  "NO ACTION": "No hacer nada (NO ACTION)",
+};
 
 const newColumn = (): Column => ({
   name: "nueva_columna",
@@ -37,6 +43,7 @@ export default function DataModelStage({ ctx }: { ctx: StageCtx }) {
   const [tab, setTab] = useState<TabKey>("diagram");
   const [draft, setDraft] = useState<DataModel | null>(data ? clone(data) : null);
   const [selected, setSelected] = useState(0);
+  const [openCol, setOpenCol] = useState<number | null>(null);
   const [summary, setSummary] = useState("");
   const toast = useToast();
 
@@ -126,7 +133,39 @@ export default function DataModelStage({ ctx }: { ctx: StageCtx }) {
       {tab === "diagram" && (
         <div className="section">
           <p className="prose">{data.summary}</p>
-          {view.mermaid && <Mermaid code={view.mermaid} />}
+          <div className="entity-cards">
+            {draft.tables.map((t, i) => (
+              <button
+                key={t.name + i}
+                className="entity-card"
+                onClick={() => {
+                  setSelected(i);
+                  setTab("tables");
+                }}
+                title={readOnly ? `Ver ${t.name}` : `Editar ${t.name}`}
+              >
+                <span className="ec-head">
+                  <strong>{t.name}</strong>
+                  <span className="ec-edit">{readOnly ? "Ver" : "Editar"}</span>
+                </span>
+                {t.description && <span className="ec-desc">{t.description}</span>}
+                <span className="ec-cols">
+                  {t.columns.slice(0, 8).map((c) => (
+                    <span key={c.name} className="ec-col">
+                      <span className={c.primary_key ? "key pk" : c.foreign_key ? "key fk" : "key"}>{c.primary_key ? "PK" : c.foreign_key ? "FK" : ""}</span>
+                      <span className="mono">{c.name}</span>
+                      <span className="muted mono">{c.type}</span>
+                    </span>
+                  ))}
+                  {t.columns.length > 8 && <span className="muted small">y {t.columns.length - 8} columnas más</span>}
+                </span>
+              </button>
+            ))}
+          </div>
+          <details className="er-details">
+            <summary>Ver diagrama entidad-relación</summary>
+            {view.mermaid && <Mermaid code={view.mermaid} />}
+          </details>
           {dirty && <p className="small muted">El diagrama muestra la versión guardada. Guarda tus cambios para actualizarlo.</p>}
           {data.notes.length > 0 && (
             <>
@@ -143,6 +182,14 @@ export default function DataModelStage({ ctx }: { ctx: StageCtx }) {
 
       {tab === "tables" && (
         <div className="section">
+          {editable && view.status === "approved" && (
+            <div className="banner info row between">
+              <span>Esta etapa está aprobada, por eso no se puede editar. Reábrela para cambiar tablas y columnas; después tendrás que aprobarla otra vez.</span>
+              <button className="btn small" disabled={working} onClick={() => run(() => api.reopen(project.id, view.kind, view.version), "Etapa reabierta. Ya puedes editar.")}>
+                Reabrir para editar
+              </button>
+            </div>
+          )}
           <div className="entity-list" role="group" aria-label="Tablas">
             {draft.tables.map((t, i) => (
               <button key={i} className="option" aria-pressed={i === selected} onClick={() => setSelected(i)}>
@@ -182,13 +229,9 @@ export default function DataModelStage({ ctx }: { ctx: StageCtx }) {
                     <tr>
                       <th>Columna</th>
                       <th>Tipo</th>
-                      <th>Nulo</th>
-                      <th>PK</th>
-                      <th>Único</th>
-                      <th>Por defecto</th>
-                      <th>FK a tabla</th>
-                      <th>Columna</th>
-                      <th>Al borrar</th>
+                      <th title="Si está marcado, no puede quedar vacío">Obligatorio</th>
+                      <th>Clave</th>
+                      <th>Relación con</th>
                       <th>Descripción</th>
                       <th>
                         <span className="sr-only">Acciones</span>
@@ -197,80 +240,93 @@ export default function DataModelStage({ ctx }: { ctx: StageCtx }) {
                   </thead>
                   <tbody>
                     {table.columns.map((c, ci) => (
-                      <tr key={ci}>
-                        <td>
-                          <input type="text" className="mono" aria-label="Nombre de columna" value={c.name} onChange={(e) => updateColumn(ci, { name: e.target.value })} style={{ minWidth: 130 }} />
-                        </td>
-                        <td>
-                          <input type="text" className="mono" aria-label="Tipo" list="pg-types" value={c.type} onChange={(e) => updateColumn(ci, { type: e.target.value })} style={{ minWidth: 150 }} />
-                        </td>
-                        <td className="chk">
-                          <input type="checkbox" aria-label="Admite nulos" checked={c.nullable} onChange={(e) => updateColumn(ci, { nullable: e.target.checked })} />
-                        </td>
-                        <td className="chk">
-                          <input type="checkbox" aria-label="Clave primaria" checked={c.primary_key} onChange={(e) => updateColumn(ci, { primary_key: e.target.checked, nullable: e.target.checked ? false : c.nullable })} />
-                        </td>
-                        <td className="chk">
-                          <input type="checkbox" aria-label="Único" checked={c.unique} onChange={(e) => updateColumn(ci, { unique: e.target.checked })} />
-                        </td>
-                        <td>
-                          <input type="text" className="mono" aria-label="Valor por defecto" value={c.default ?? ""} onChange={(e) => updateColumn(ci, { default: e.target.value || null })} style={{ minWidth: 90 }} />
-                        </td>
-                        <td>
-                          <select
-                            aria-label="Tabla referenciada"
-                            value={c.foreign_key?.table ?? ""}
-                            onChange={(e) =>
-                              updateColumn(ci, { foreign_key: e.target.value ? { table: e.target.value, column: "id", on_delete: c.foreign_key?.on_delete ?? "RESTRICT" } : null })
-                            }
-                          >
-                            <option value="">—</option>
-                            {draft.tables.map((t) => (
-                              <option key={t.name} value={t.name}>
-                                {t.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          {c.foreign_key && (
+                      <Fragment key={ci}>
+                        <tr>
+                          <td>
+                            <input type="text" className="mono" aria-label="Nombre de columna" value={c.name} onChange={(e) => updateColumn(ci, { name: e.target.value })} style={{ minWidth: 130 }} />
+                          </td>
+                          <td>
+                            <input type="text" className="mono" aria-label="Tipo" list="pg-types" value={c.type} onChange={(e) => updateColumn(ci, { type: e.target.value })} style={{ minWidth: 130 }} />
+                          </td>
+                          <td className="chk">
+                            <input type="checkbox" aria-label="Obligatorio" checked={!c.nullable} disabled={c.primary_key} onChange={(e) => updateColumn(ci, { nullable: !e.target.checked })} />
+                          </td>
+                          <td>
                             <select
-                              aria-label="Columna referenciada"
-                              value={c.foreign_key.column}
-                              onChange={(e) => updateColumn(ci, { foreign_key: { ...c.foreign_key!, column: e.target.value } })}
+                              aria-label="Clave"
+                              value={c.primary_key ? "pk" : c.unique ? "unique" : ""}
+                              onChange={(e) => updateColumn(ci, { primary_key: e.target.value === "pk", unique: e.target.value === "unique", nullable: e.target.value === "pk" ? false : c.nullable })}
                             >
-                              {(draft.tables.find((t) => t.name === c.foreign_key!.table)?.columns ?? []).map((pc) => (
-                                <option key={pc.name} value={pc.name}>
-                                  {pc.name}
+                              <option value="">—</option>
+                              <option value="pk">Primaria</option>
+                              <option value="unique">Única</option>
+                            </select>
+                          </td>
+                          <td>
+                            <select
+                              aria-label="Tabla relacionada"
+                              value={c.foreign_key?.table ?? ""}
+                              onChange={(e) =>
+                                updateColumn(ci, { foreign_key: e.target.value ? { table: e.target.value, column: "id", on_delete: c.foreign_key?.on_delete ?? "RESTRICT" } : null })
+                              }
+                            >
+                              <option value="">—</option>
+                              {draft.tables.map((t) => (
+                                <option key={t.name} value={t.name}>
+                                  {t.name}
                                 </option>
                               ))}
                             </select>
-                          )}
-                        </td>
-                        <td>
-                          {c.foreign_key && (
-                            <select
-                              aria-label="Acción al borrar"
-                              value={c.foreign_key.on_delete}
-                              onChange={(e) => updateColumn(ci, { foreign_key: { ...c.foreign_key!, on_delete: e.target.value as FK["on_delete"] } })}
-                            >
-                              {ON_DELETE.map((o) => (
-                                <option key={o}>{o}</option>
-                              ))}
-                            </select>
-                          )}
-                        </td>
-                        <td>
-                          <input type="text" aria-label="Descripción" value={c.description} onChange={(e) => updateColumn(ci, { description: e.target.value })} style={{ minWidth: 160 }} />
-                        </td>
-                        <td>
-                          {!readOnly && (
-                            <button className="btn ghost small" aria-label={`Quitar ${c.name}`} onClick={() => updateTable((t) => t.columns.splice(ci, 1))}>
-                              Quitar
+                          </td>
+                          <td>
+                            <input type="text" aria-label="Descripción" value={c.description} onChange={(e) => updateColumn(ci, { description: e.target.value })} style={{ minWidth: 180 }} />
+                          </td>
+                          <td className="row-acts">
+                            <button className="btn ghost small" aria-expanded={openCol === ci} onClick={() => setOpenCol(openCol === ci ? null : ci)}>
+                              {openCol === ci ? "Menos" : "Más"}
                             </button>
-                          )}
-                        </td>
-                      </tr>
+                            {!readOnly && (
+                              <button className="btn ghost small" aria-label={`Quitar ${c.name}`} onClick={() => updateTable((t) => t.columns.splice(ci, 1))}>
+                                Quitar
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                        {openCol === ci && (
+                          <tr className="col-more">
+                            <td colSpan={7}>
+                              <label>
+                                Valor por defecto
+                                <input type="text" className="mono" value={c.default ?? ""} onChange={(e) => updateColumn(ci, { default: e.target.value || null })} placeholder="ej.: now()" />
+                              </label>
+                              {c.foreign_key && (
+                                <>
+                                  <label>
+                                    Columna de {c.foreign_key.table}
+                                    <select value={c.foreign_key.column} onChange={(e) => updateColumn(ci, { foreign_key: { ...c.foreign_key!, column: e.target.value } })}>
+                                      {(draft.tables.find((t) => t.name === c.foreign_key!.table)?.columns ?? []).map((pc) => (
+                                        <option key={pc.name} value={pc.name}>
+                                          {pc.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label>
+                                    Si se borra el registro de {c.foreign_key.table}
+                                    <select value={c.foreign_key.on_delete} onChange={(e) => updateColumn(ci, { foreign_key: { ...c.foreign_key!, on_delete: e.target.value as FK["on_delete"] } })}>
+                                      {ON_DELETE.map((o) => (
+                                        <option key={o} value={o}>
+                                          {ON_DELETE_LABEL[o]}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -286,7 +342,9 @@ export default function DataModelStage({ ctx }: { ctx: StageCtx }) {
                 </button>
               )}
 
-              <div className="split" style={{ marginTop: 20, gap: 24 }}>
+              <details className="advanced">
+              <summary>Opciones avanzadas: índices, restricciones y tipos enumerados</summary>
+              <div className="split" style={{ marginTop: 12, gap: 24 }}>
                 <div>
                   <h4>Índices</h4>
                   {table.indexes.map((ix, i) => (
@@ -381,6 +439,7 @@ export default function DataModelStage({ ctx }: { ctx: StageCtx }) {
                   Agregar enum
                 </button>
               )}
+              </details>
             </fieldset>
           )}
 

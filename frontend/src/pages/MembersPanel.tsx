@@ -131,7 +131,7 @@ export default function MembersPanel({ project, onClose, onChange }: { project: 
             </button>
           </div>
           <p className="small muted" style={{ marginTop: 8 }}>
-            La persona verá la invitación al entrar a Ideator con ese correo.
+            La persona verá la invitación al entrar a Plano con ese correo.
           </p>
         </form>
       )}

@@ -21,7 +21,7 @@ export function GenerateFirst({ ctx, what, button }: { ctx: StageCtx; what: stri
   return (
     <div className="box">
       <h3>Aún no hay {what}</h3>
-      <p className="muted">Ideator lo propone a partir de lo aprobado en las etapas anteriores. Después podrás revisarlo, editarlo y pedir cambios.</p>
+      <p className="muted">Plano lo propone a partir de lo aprobado en las etapas anteriores. Después podrás revisarlo, editarlo y pedir cambios.</p>
       {editable ? (
         <>
           <div className="field">

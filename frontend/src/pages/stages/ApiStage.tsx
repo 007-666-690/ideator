@@ -100,7 +100,7 @@ export default function ApiStage({ ctx }: { ctx: StageCtx }) {
   if (!spec) {
     return (
       <>
-        <StageIntro title="Backend y API">Ideator define cada endpoint: método, ruta, qué recibe, qué devuelve y los errores posibles, consistente con el modelo de datos aprobado.</StageIntro>
+        <StageIntro title="Backend y API">Plano define cada endpoint: método, ruta, qué recibe, qué devuelve y los errores posibles, consistente con el modelo de datos aprobado.</StageIntro>
         <GenerateFirst ctx={ctx} what="una especificación de la API" button="Proponer API" />
       </>
     );

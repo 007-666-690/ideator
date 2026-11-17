@@ -28,7 +28,7 @@ export default function ArchitectureStage({ ctx }: { ctx: StageCtx }) {
   return (
     <>
       <StageIntro title="Arquitectura">
-        Ideator compara cinco arquitecturas base con lo que el producto necesita. El equipo elige una y la IA la detalla: tecnologías, autenticación y SSO, despliegue y observabilidad.
+        Plano compara cinco arquitecturas base con lo que el producto necesita. El equipo elige una y la IA la detalla: tecnologías, autenticación y SSO, despliegue y observabilidad.
       </StageIntro>
 
       <section className="section">

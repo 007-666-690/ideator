@@ -74,7 +74,7 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
     return (
       <>
         <StageIntro title="Definición del producto">
-          Ideator conversa con el equipo para entender el problema, los usuarios y el alcance del MVP. Cuando falte una decisión que cambia la solución, la marca como bloqueante y no avanza hasta resolverla.
+          Plano conversa con el equipo para entender el problema, los usuarios y el alcance del MVP. Cuando falte una decisión que cambia la solución, la marca como bloqueante y no avanza hasta resolverla.
         </StageIntro>
         <div className="box">
           <h3>La idea inicial</h3>
@@ -108,7 +108,7 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
   return (
     <>
       <StageIntro title="Definición del producto">
-        Ronda {view.content.round}. Responde las preguntas; las bloqueantes deben resolverse antes de aprobar la etapa. Si prefieres que Ideator decida, usa «Que decida Ideator» y quedará registrado como decisión delegada.
+        Ronda {view.content.round}. Responde las preguntas; las bloqueantes deben resolverse antes de aprobar la etapa. Si prefieres que Plano decida, usa «Que decida Plano» y quedará registrado como decisión delegada.
       </StageIntro>
 
       {view.content.contradictions?.length > 0 && (
@@ -183,7 +183,7 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
                   />
                   <div className="row" style={{ marginTop: 8 }}>
                     <button type="button" className="option" aria-pressed={!!d?.delegate} onClick={() => setDraft(q, { delegate: !d?.delegate })}>
-                      Que decida Ideator
+                      Que decida Plano
                     </button>
                     {!q.blocking && (
                       <button type="button" className="btn ghost small" disabled={working} onClick={() => run(() => api.dismissQuestion(project.id, q.id, "No aplica para el MVP"), "Pregunta descartada.")}>
@@ -199,7 +199,7 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
         {canWork && (
           <div className="box" style={{ marginTop: 6 }}>
             <div className="field">
-              <label htmlFor="msg">Algo más que Ideator deba saber (opcional)</label>
+              <label htmlFor="msg">Algo más que Plano deba saber (opcional)</label>
               <textarea id="msg" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Ej.: cambiamos de idea, el MVP no incluye pagos" />
             </div>
             <button className="btn" disabled={working || (ready.length === 0 && message.trim().length === 0)} onClick={submit}>
@@ -218,7 +218,7 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
             {view.messages.map((m) => (
               <div key={m.id} className={`msg ${m.role}`}>
                 <div className="who">
-                  {m.role === "assistant" ? "Ideator" : m.author?.name ?? "Equipo"}, {timeAgo(m.created_at)}
+                  {m.role === "assistant" ? "Plano" : m.author?.name ?? "Equipo"}, {timeAgo(m.created_at)}
                 </div>
                 <div className="body">{m.content}</div>
               </div>
@@ -263,7 +263,7 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
                 <span className="rid">{q.code}</span>
                 <strong>{q.text}</strong>
                 <div className="answered">
-                  {q.status === "dismissed" ? "Descartada" : "Respuesta"}: <strong>{q.answer?.startsWith("[DELEGADO]") ? "Delegada a Ideator" : q.answer}</strong>
+                  {q.status === "dismissed" ? "Descartada" : "Respuesta"}: <strong>{q.answer?.startsWith("[DELEGADO]") ? "Delegada a Plano" : q.answer}</strong>
                   {q.answered_by && <span className="muted"> ({q.answered_by.name}, {timeAgo(q.answered_at)})</span>}
                 </div>
               </div>

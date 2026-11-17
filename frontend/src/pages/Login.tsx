@@ -3,6 +3,7 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { Logo } from "../components/TopBar";
+import { APP_NAME } from "../util";
 
 const SSO_ERRORS: Record<string, string> = {
   sso_failed: "El proveedor rechazó el inicio de sesión. Intenta de nuevo.",
@@ -48,13 +49,25 @@ export default function Login() {
 
   return (
     <main className="auth-wrap">
-      <div className="auth">
-        <div className="wordmark" style={{ marginBottom: 18 }}>
+      <section className="auth-hero" aria-label={`Qué es ${APP_NAME}`}>
+        <div className="wordmark light">
           <Logo />
-          Ideator
+          {APP_NAME}
+          <span className="by">Ideator</span>
         </div>
+        <p className="hero-title">De la idea al plano.</p>
+        <p className="hero-lead">Cuenta tu idea. {APP_NAME} te hace las preguntas que faltan y la convierte en una especificación que otra IA puede construir sin adivinar.</p>
+        <ol className="hero-path" aria-label="Etapas">
+          {["Definición", "Datos", "API", "Pantallas", "Arquitectura", "Revisión", "Documentos"].map((s, i) => (
+            <li key={s} className={i < 3 ? "done" : ""}>
+              {s}
+            </li>
+          ))}
+        </ol>
+      </section>
+      <div className="auth">
         <h1 style={{ fontSize: 26 }}>{mode === "login" ? "Inicia sesión" : "Crea tu cuenta"}</h1>
-        <p className="lead">Convierte una idea en una especificación que otra IA puede construir sin adivinar.</p>
+        <p className="lead">{mode === "login" ? "Entra para seguir con tus proyectos." : "Es gratis y toma un minuto."}</p>
         {error && <div className="banner error">{error}</div>}
         {enabled.length > 0 && (
           <>

@@ -45,7 +45,7 @@ export default function DocumentsStage({ project, editable, onChange }: { projec
   return (
     <>
       <StageIntro title="Documentos">
-        Ideator genera dos archivos Markdown pensados para entregarlos a otra IA: la especificación del producto y la arquitectura. Se arman desde lo aprobado, sin depender de la conversación.
+        Plano genera dos archivos Markdown pensados para entregarlos a otra IA: la especificación del producto y la arquitectura. Se arman desde lo aprobado, sin depender de la conversación.
       </StageIntro>
       <div className="box section">
         {pending.length ? (

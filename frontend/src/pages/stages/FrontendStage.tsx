@@ -1,92 +1,169 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../api";
+import Mockup, { menuFrom } from "../../components/Mockup";
 import { Mermaid, Tabs } from "../../components/ui";
 import type { FrontendSpec, Screen } from "../../types";
 import type { StageCtx } from "../Project";
 import { ChangeRequest, GenerateFirst, JsonEditor, StageIntro } from "./common";
 
-function Sketch({ screen, start }: { screen: Screen; start: boolean }) {
+type TabKey = "proto" | "all" | "map" | "json";
+
+function ScreenNotes({ screen, spec }: { screen: Screen; spec: FrontendSpec }) {
+  const out = spec.navigation.filter((n) => n.from_screen === screen.id);
+  const name = (id: string) => spec.screens.find((s) => s.id === id)?.name ?? id;
   return (
-    <article className="sketch" aria-label={`Boceto de ${screen.name}`}>
-      <div className="bar">
-        <strong>
-          {screen.id} {screen.name}
-        </strong>
-        <span className="route">{screen.route}</span>
+    <dl className="screen-notes">
+      <div>
+        <dt>Ruta</dt>
+        <dd className="mono">{screen.route}</dd>
       </div>
-      <p className="muted" style={{ margin: "0 0 8px" }}>
-        {screen.purpose}
-        {start ? " Es la pantalla inicial." : ""}
-      </p>
-      {screen.sections.map((sec, i) => (
-        <div className="block" key={i}>
-          <div className="bt">
-            {sec.title} <span className="muted">({sec.kind})</span>
-          </div>
-          {sec.elements.map((e) => (
-            <span className="placeholder" key={e}>
-              {e}
-            </span>
-          ))}
-          <div>
-            {sec.actions.map((a) => (
-              <span className="act" key={a.label} title={[a.endpoint_id && `Llama a ${a.endpoint_id}`, a.target_screen && `Va a ${a.target_screen}`].filter(Boolean).join(", ")}>
-                {a.label}
-                {a.endpoint_id ? ` (${a.endpoint_id})` : ""}
-                {a.roles.length ? ` (${a.roles.join(", ")})` : ""}
-              </span>
-            ))}
-          </div>
+      <div>
+        <dt>Quién entra</dt>
+        <dd>{screen.roles.join(", ")}</dd>
+      </div>
+      {screen.data_endpoints.length > 0 && (
+        <div>
+          <dt>Datos que carga</dt>
+          <dd className="mono">{screen.data_endpoints.join(", ")}</dd>
         </div>
-      ))}
-      <div className="who">
-        Acceso: {screen.roles.join(", ")}
-        {screen.data_endpoints.length > 0 && `. Carga ${screen.data_endpoints.join(", ")}`}
-        {screen.journey_steps.length > 0 && `. Pasos del recorrido: ${screen.journey_steps.join(", ")}`}.
-      </div>
-      {screen.states.length > 0 && <div className="who">Estados: {screen.states.join("; ")}</div>}
-    </article>
+      )}
+      {out.length > 0 && (
+        <div>
+          <dt>Lleva a</dt>
+          <dd>{out.map((n) => `${name(n.to_screen)} (${n.trigger})`).join(" · ")}</dd>
+        </div>
+      )}
+      {screen.states.length > 0 && (
+        <div>
+          <dt>Estados</dt>
+          <dd>
+            <ul>
+              {screen.states.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+      )}
+    </dl>
   );
 }
 
 export default function FrontendStage({ ctx }: { ctx: StageCtx }) {
   const { project, view, run } = ctx;
   const spec: FrontendSpec | null = view.content.data;
-  const [tab, setTab] = useState<"map" | "screens" | "json">("screens");
+  const [tab, setTab] = useState<TabKey>("proto");
+  const [current, setCurrent] = useState<string | null>(null);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [history, setHistory] = useState<string[]>([]);
+
+  useEffect(() => {
+    setCurrent(spec?.start_screen ?? spec?.screens[0]?.id ?? null);
+    setHistory([]);
+  }, [view.version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!spec) {
     return (
       <>
-        <StageIntro title="Pantallas y navegación">Ideator propone las pantallas del MVP, qué muestra cada una, qué acciones llaman a qué endpoint y cómo se navega entre ellas.</StageIntro>
+        <StageIntro title="Pantallas y navegación">Plano propone las pantallas del MVP, dibuja cómo se vería cada una y arma un prototipo navegable con sus botones.</StageIntro>
         <GenerateFirst ctx={ctx} what="pantallas definidas" button="Proponer pantallas" />
       </>
     );
   }
+
+  const screen = spec.screens.find((s) => s.id === current) ?? spec.screens[0];
+  const menu = menuFrom(spec.screens);
+  const go = (id: string) => {
+    if (!spec.screens.some((s) => s.id === id) || id === screen?.id) return;
+    setHistory((h) => [...h, screen.id]);
+    setCurrent(id);
+  };
+  const back = () =>
+    setHistory((h) => {
+      const prev = h[h.length - 1];
+      if (prev) setCurrent(prev);
+      return h.slice(0, -1);
+    });
 
   return (
     <>
       <StageIntro title="Pantallas y navegación">
         {spec.summary} {spec.layout}
       </StageIntro>
-      <Tabs
+      <Tabs<TabKey>
         tabs={[
-          ["screens", `Bocetos (${spec.screens.length})`],
+          ["proto", "Prototipo"],
+          ["all", `Todas las pantallas (${spec.screens.length})`],
           ["map", "Mapa de navegación"],
           ["json", "JSON"],
         ]}
         value={tab}
         onChange={setTab}
       />
-      {tab === "screens" && (
+
+      {tab === "proto" && screen && (
+        <div className="section proto">
+          <div className="proto-bar">
+            <div className="segmented" role="group" aria-label="Dispositivo">
+              <button aria-pressed={device === "desktop"} onClick={() => setDevice("desktop")}>
+                Computador
+              </button>
+              <button aria-pressed={device === "mobile"} onClick={() => setDevice("mobile")}>
+                Celular
+              </button>
+            </div>
+            <button className="btn ghost small" disabled={!history.length} onClick={back}>
+              ← Atrás
+            </button>
+            <button className="btn ghost small" disabled={screen.id === spec.start_screen} onClick={() => go(spec.start_screen)}>
+              Ir al inicio
+            </button>
+            <span className="small muted grow">Haz clic en los botones de la maqueta para navegar como lo haría un usuario.</span>
+          </div>
+          <div className="proto-grid">
+            <nav className="screen-index" aria-label="Pantallas">
+              {spec.screens.map((s) => (
+                <button key={s.id} aria-current={s.id === screen.id ? "page" : undefined} onClick={() => go(s.id)}>
+                  <span className="sid">{s.id}</span>
+                  <span>{s.name}</span>
+                  {s.id === spec.start_screen && <span className="start">inicio</span>}
+                </button>
+              ))}
+            </nav>
+            <div className="proto-stage">
+              <Mockup screen={screen} appName={project.name} device={device} menu={menu} onGo={go} />
+              <ScreenNotes screen={screen} spec={spec} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "all" && (
         <div className="section">
-          <div className="screens">
+          <div className="mockup-wall">
             {spec.screens.map((s) => (
-              <Sketch key={s.id} screen={s} start={s.id === spec.start_screen} />
+              <button
+                key={s.id}
+                className="wall-item"
+                onClick={() => {
+                  setCurrent(s.id);
+                  setHistory([]);
+                  setTab("proto");
+                }}
+              >
+                <span className="wall-label">
+                  <span className="sid">{s.id}</span> {s.name}
+                  {s.id === spec.start_screen && <span className="start">inicio</span>}
+                </span>
+                <span className="wall-frame" aria-hidden="true">
+                  <Mockup screen={s} appName={project.name} device="desktop" menu={menu} compact />
+                </span>
+              </button>
             ))}
           </div>
           {spec.design_guidelines.length > 0 && (
             <>
-              <h4 style={{ marginTop: 20 }}>Lineamientos</h4>
+              <h4 style={{ marginTop: 24 }}>Lineamientos de diseño</h4>
               <ul>
                 {spec.design_guidelines.map((g, i) => (
                   <li key={i}>{g}</li>
@@ -96,6 +173,7 @@ export default function FrontendStage({ ctx }: { ctx: StageCtx }) {
           )}
         </div>
       )}
+
       {tab === "map" && <div className="section">{view.navigation_map && <Mermaid code={view.navigation_map} />}</div>}
       {tab === "json" && (
         <div className="section">
