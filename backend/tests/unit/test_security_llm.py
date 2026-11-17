@@ -188,3 +188,24 @@ def test_client_falls_back_to_max_tokens_when_rejected():
     result = _client(completions).complete(task="data_model", system="s", user="u", schema=DataModel)
     assert isinstance(result, DataModel)
     assert "max_tokens" in completions.calls[-1] and "max_completion_tokens" not in completions.calls[-1]
+
+
+def test_client_uses_fallback_model_when_overloaded():
+    import httpx
+    import openai
+    from app.ideator import fake
+
+    class Busy(_FakeCompletions):
+        def create(self, **kwargs):
+            if kwargs["model"] == "principal":
+                self.calls.append(kwargs)
+                response = httpx.Response(503, request=httpx.Request("POST", "https://x.invalid"))
+                raise openai.InternalServerError("Service Unavailable", response=response, body=None)
+            return super().create(**kwargs)
+
+    completions = Busy([json.dumps(fake.DATA_MODEL)])
+    client = _client(completions)
+    client.model, client.fallback_model = "principal", "respaldo"
+    result = client.complete(task="data_model", system="s", user="u", schema=DataModel)
+    assert isinstance(result, DataModel)
+    assert [c["model"] for c in completions.calls] == ["principal", "respaldo"]

@@ -114,6 +114,7 @@ class AzureOpenAIClient(LLMClient):
         self._client = OpenAI(base_url=base_url, api_key=api_key, timeout=settings.llm_timeout_seconds, max_retries=2)
         self._strict_supported = True
         self._tokens_param = "max_completion_tokens"
+        self.fallback_model = ""
 
     def _request(self, system: str, user: str, schema: type[BaseModel], effort: str) -> tuple[str, Any]:
         import openai
@@ -138,6 +139,13 @@ class AzureOpenAIClient(LLMClient):
                 + json.dumps(strict_json_schema(schema), ensure_ascii=False)
             )
         try:
+            response = self._client.chat.completions.create(**kwargs)
+        except (openai.RateLimitError, openai.InternalServerError) as exc:
+            # Modelo saturado: se prueba una vez con el modelo de respaldo, si hay uno.
+            if not self.fallback_model or self.fallback_model == kwargs["model"]:
+                raise
+            logger.warning("Modelo saturado, se usa el de respaldo", extra={"model": kwargs["model"], "fallback": self.fallback_model, "error": str(exc)[:200]})
+            kwargs["model"] = self.fallback_model
             response = self._client.chat.completions.create(**kwargs)
         except openai.BadRequestError as exc:
             text = str(exc).lower()
@@ -221,6 +229,7 @@ class GeminiClient(AzureOpenAIClient):
         if not settings.gemini_api_key:
             raise LLMUnavailable("El modelo de IA no está configurado (GEMINI_API_KEY).")
         self._setup(settings, settings.gemini_base_url, settings.gemini_api_key, settings.gemini_model)
+        self.fallback_model = settings.gemini_fallback_model
 
 
 _client: LLMClient | None = None

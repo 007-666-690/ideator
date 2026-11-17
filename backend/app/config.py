@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     # Gemini (Google AI Studio / créditos de Google Cloud), por su API compatible con OpenAI
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
+    # Si el modelo principal está saturado (503/429/500), se reintenta con este. Vacío = sin respaldo.
+    gemini_fallback_model: str = "gemini-3.6-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     llm_reasoning_effort: str = "low"  # minimal | low | medium | high
     llm_timeout_seconds: int = 300
