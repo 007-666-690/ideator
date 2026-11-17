@@ -21,6 +21,7 @@ KEY_VAULT_SECRETS = {
     "ideator-secret-key": "secret_key",
     "ideator-database-url": "database_url",
     "azure-openai-api-key": "azure_openai_api_key",
+    "gemini-api-key": "gemini_api_key",
     "microsoft-client-secret": "microsoft_client_secret",
     "google-client-secret": "google_client_secret",
 }
@@ -47,10 +48,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
 
     # IA
-    llm_provider: str = "fake"  # azure | fake
+    llm_provider: str = "fake"  # azure | gemini | fake
     azure_openai_endpoint: str = ""  # https://<recurso>.openai.azure.com/openai/v1
     azure_openai_api_key: str = ""
     azure_openai_deployment: str = "gpt-5"
+    # Gemini (Google AI Studio / créditos de Google Cloud), por su API compatible con OpenAI
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     llm_reasoning_effort: str = "low"  # minimal | low | medium | high
     llm_timeout_seconds: int = 300
     llm_max_output_tokens: int = 32000
@@ -84,6 +89,8 @@ class Settings(BaseSettings):
     def llm_configured(self) -> bool:
         if self.llm_provider == "fake":
             return True
+        if self.llm_provider == "gemini":
+            return bool(self.gemini_api_key)
         return bool(self.azure_openai_endpoint and self.azure_openai_api_key)
 
 
@@ -113,7 +120,7 @@ def validate_settings(settings: Settings) -> None:
         if settings.secret_key == DEFAULT_SECRET or len(settings.secret_key) < 32:
             raise RuntimeError("SECRET_KEY debe definirse (mínimo 32 caracteres) en producción")
         if settings.llm_provider == "fake":
-            raise RuntimeError("En producción LLM_PROVIDER debe ser 'azure'")
+            raise RuntimeError("En producción LLM_PROVIDER debe ser 'azure' o 'gemini'")
         if not settings.cookie_secure:
             raise RuntimeError("En producción COOKIE_SECURE debe ser true")
 

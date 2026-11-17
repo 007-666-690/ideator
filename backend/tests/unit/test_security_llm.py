@@ -153,3 +153,38 @@ def test_azure_client_maps_connection_errors():
 def test_azure_client_requires_configuration():
     with pytest.raises(LLMUnavailable):
         AzureOpenAIClient(Settings(llm_provider="azure", azure_openai_endpoint="", azure_openai_api_key=""))
+
+
+def test_gemini_client_uses_openai_compatible_endpoint():
+    from app.ideator.llm import GeminiClient, get_llm, set_llm
+
+    settings = Settings(llm_provider="gemini", gemini_api_key="clave-de-prueba", gemini_model="gemini-3.8-flash")
+    assert settings.llm_configured
+    set_llm(None)
+    try:
+        client = get_llm(settings)
+        assert isinstance(client, GeminiClient) and client.model == "gemini-3.8-flash"
+        assert str(client._client.base_url).startswith("https://generativelanguage.googleapis.com/v1beta/openai")
+    finally:
+        set_llm(None)
+    with pytest.raises(LLMUnavailable):
+        GeminiClient(Settings(llm_provider="gemini", gemini_api_key=""))
+
+
+def test_client_falls_back_to_max_tokens_when_rejected():
+    import httpx
+    import openai
+    from app.ideator import fake
+
+    class Picky(_FakeCompletions):
+        def create(self, **kwargs):
+            if "max_completion_tokens" in kwargs:
+                self.calls.append(kwargs)
+                response = httpx.Response(400, request=httpx.Request("POST", "https://x.invalid"))
+                raise openai.BadRequestError("Unknown name max_completion_tokens", response=response, body=None)
+            return super().create(**kwargs)
+
+    completions = Picky([json.dumps(fake.DATA_MODEL)])
+    result = _client(completions).complete(task="data_model", system="s", user="u", schema=DataModel)
+    assert isinstance(result, DataModel)
+    assert "max_tokens" in completions.calls[-1] and "max_completion_tokens" not in completions.calls[-1]

@@ -1,6 +1,7 @@
 """Cliente del modelo de IA.
 
 - AzureOpenAIClient: GPT-5 desplegado en Azure OpenAI (endpoint v1 compatible con OpenAI).
+- GeminiClient: Gemini de Google por su endpoint compatible con OpenAI (créditos de Google Cloud).
 - FakeLLM (en fake.py): respuestas deterministas para pruebas automáticas y modo demo.
 
 Todas las respuestas se piden como salida estructurada (JSON Schema estricto) y se
@@ -100,20 +101,19 @@ class AzureOpenAIClient(LLMClient):
     name = "azure"
 
     def __init__(self, settings: Settings) -> None:
-        from openai import OpenAI
-
         if not settings.azure_openai_endpoint or not settings.azure_openai_api_key:
             raise LLMUnavailable("El modelo de IA no está configurado (AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY).")
-        self.model = settings.azure_openai_deployment
+        self._setup(settings, settings.azure_openai_endpoint.rstrip("/"), settings.azure_openai_api_key, settings.azure_openai_deployment)
+
+    def _setup(self, settings: Settings, base_url: str, api_key: str, model: str) -> None:
+        from openai import OpenAI
+
+        self.model = model
         self.default_effort = settings.llm_reasoning_effort
         self.max_tokens = settings.llm_max_output_tokens
-        self._client = OpenAI(
-            base_url=settings.azure_openai_endpoint.rstrip("/"),
-            api_key=settings.azure_openai_api_key,
-            timeout=settings.llm_timeout_seconds,
-            max_retries=2,
-        )
+        self._client = OpenAI(base_url=base_url, api_key=api_key, timeout=settings.llm_timeout_seconds, max_retries=2)
         self._strict_supported = True
+        self._tokens_param = "max_completion_tokens"
 
     def _request(self, system: str, user: str, schema: type[BaseModel], effort: str) -> tuple[str, Any]:
         import openai
@@ -122,7 +122,7 @@ class AzureOpenAIClient(LLMClient):
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_completion_tokens": self.max_tokens,
+            self._tokens_param: self.max_tokens,
             "reasoning_effort": effort,
         }
         if self._strict_supported:
@@ -144,6 +144,9 @@ class AzureOpenAIClient(LLMClient):
             if self._strict_supported and ("response_format" in text or "json_schema" in text or "schema" in text):
                 logger.warning("El endpoint no acepta json_schema estricto; se usa json_object", extra={"error": str(exc)[:300]})
                 self._strict_supported = False
+                return self._request(system, user, schema, effort)
+            if "max_completion_tokens" in text and self._tokens_param == "max_completion_tokens":
+                self._tokens_param = "max_tokens"
                 return self._request(system, user, schema, effort)
             if "reasoning_effort" in text and "reasoning_effort" in kwargs:
                 kwargs.pop("reasoning_effort")
@@ -209,6 +212,17 @@ class AzureOpenAIClient(LLMClient):
         LLM_TOKENS.labels(task, "output").inc(getattr(usage, "completion_tokens", 0) or 0)
 
 
+class GeminiClient(AzureOpenAIClient):
+    """Gemini por su API compatible con OpenAI: mismas instrucciones, esquemas y reintentos."""
+
+    name = "gemini"
+
+    def __init__(self, settings: Settings) -> None:
+        if not settings.gemini_api_key:
+            raise LLMUnavailable("El modelo de IA no está configurado (GEMINI_API_KEY).")
+        self._setup(settings, settings.gemini_base_url, settings.gemini_api_key, settings.gemini_model)
+
+
 _client: LLMClient | None = None
 
 
@@ -222,6 +236,8 @@ def get_llm(settings: Settings) -> LLMClient:
         _client = FakeLLM()
     elif settings.llm_provider == "azure":
         _client = AzureOpenAIClient(settings)
+    elif settings.llm_provider == "gemini":
+        _client = GeminiClient(settings)
     else:
         raise LLMUnavailable(f"Proveedor de IA desconocido: {settings.llm_provider}")
     return _client

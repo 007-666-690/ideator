@@ -5,7 +5,7 @@ proyecto con la idea indicada, responde las preguntas (eligiendo la primera
 opción o delegando a la IA), genera y aprueba cada etapa, corre la revisión y
 escribe los dos Markdown en la carpeta de salida.
 
-Uso (desde la carpeta backend, con el .env configurado con LLM_PROVIDER=azure):
+Uso (desde la carpeta backend, con el .env configurado con LLM_PROVIDER=azure o gemini):
     python scripts/simular_caso.py --idea "Una app para ..." --salida salida
     python scripts/simular_caso.py --idea-archivo caso.txt --rondas 4
 """
@@ -59,8 +59,8 @@ def main() -> None:
 
     tmp = Path(tempfile.mkdtemp())
     settings = Settings(database_url=f"sqlite:///{tmp / 'sim.db'}", log_level="WARNING", login_max_attempts=100)
-    if settings.llm_provider != "azure":
-        log("Aviso: LLM_PROVIDER no es 'azure'; se usará el modelo simulado.")
+    if settings.llm_provider not in ("azure", "gemini"):
+        log("Aviso: LLM_PROVIDER no es 'azure' ni 'gemini'; se usará el modelo simulado.")
     out = Path(args.salida)
     out.mkdir(parents=True, exist_ok=True)
     trace: list[dict] = []
