@@ -20,6 +20,7 @@ export interface StageSummary {
   version: number;
   updated_at: string | null;
   generating: boolean;
+  auto_error?: string | null;
 }
 
 export interface QuestionCounts {

@@ -14,7 +14,7 @@ from ..config import Settings, get_settings
 from ..db import get_db
 from ..deps import ProjectAccess, editor_access, get_current_user, viewer_access
 from ..errors import ApiError
-from ..ideator import engine
+from ..ideator import autopilot, engine
 from ..ideator.architectures import BASE_ARCHITECTURES
 from ..ideator.engine import iso, stage_view, stages_by_kind, user_ref
 from ..ideator.llm import LLMClient, LLMError, get_llm
@@ -213,11 +213,29 @@ def architecture_select(body: SelectIn, access: ProjectAccess = Depends(editor_a
 
 
 @router.post("/projects/{project_id}/stages/{kind}/approve")
-def approve(kind: str, body: VersionIn, access: ProjectAccess = Depends(editor_access), db: Session = Depends(get_db)) -> dict[str, Any]:
+def approve(
+    kind: str,
+    body: VersionIn,
+    access: ProjectAccess = Depends(editor_access),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
     if kind not in STAGE_KINDS:
         raise ApiError(404, "stage_not_found", f"La etapa '{kind}' no existe.")
     engine.approve_stage(db, access.project, access.user, kind, body.version)
-    return full_stage(db, access, kind)
+    view = full_stage(db, access, kind)
+    if view["status"] == "approved":
+        autopilot.kick(access.project.id, access.user.id, settings)
+    return view
+
+
+@router.post("/projects/{project_id}/autopilot")
+def autopilot_resume(access: ProjectAccess = Depends(editor_access), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Reintenta el piloto automático después de un error (por ejemplo, la IA saturada)."""
+    for stage in stages_by_kind(db, access.project.id).values():
+        autopilot.clear_error(db, stage)
+    autopilot.kick(access.project.id, access.user.id, settings)
+    return {"ok": True, "enabled": settings.autopilot}
 
 
 @router.get("/projects/{project_id}/stages/{kind}/markdown")

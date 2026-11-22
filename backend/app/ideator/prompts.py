@@ -160,7 +160,7 @@ REGLAS
   · éxito: 200 (lectura o actualización), 201 (creación, devuelve el recurso creado), 204 (eliminación, sin cuerpo);
   · 400 o 422 si recibe datos (cuerpo o query obligatoria): 400 = solicitud mal formada, 422 = datos que no cumplen las validaciones;
   · 401 si requiere sesión: no hay token o es inválido/expirado;
-  · 403 si el usuario autenticado no tiene el rol o no es dueño/miembro del recurso;
+  · 403 solo si puede ocurrir: hay usuarios autenticados de otro rol que no entran, o el endpoint recibe un id de un recurso que puede ser de otra persona. Endpoints sobre "mi" sesión o cuenta (/me, /sessions/current) NO documentan 403;
   · 404 si recibe un id en la ruta y el recurso no existe;
   · 409 si puede haber conflicto de estado o duplicados (ej. horario ya tomado, correo ya registrado);
   · 502/503 solo si depende de un servicio externo que puede fallar.

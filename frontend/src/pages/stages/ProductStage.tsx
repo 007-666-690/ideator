@@ -1,19 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import type { Brief, Question } from "../../types";
-import { DELEGATED, timeAgo } from "../../util";
+import { DELEGATED } from "../../util";
 import type { StageCtx } from "../Project";
 import { JsonEditor, List, StageIntro } from "./common";
 
-const AFFECTS: Record<string, string> = {
-  datos: "Modelo de datos",
-  backend: "API",
-  interfaz: "Pantallas",
-  arquitectura: "Arquitectura",
-  alcance: "Alcance",
-  negocio: "Reglas de negocio",
-  seguridad: "Seguridad",
-};
 
 const EDGE: Record<string, string> = {
   falta_informacion: "Falta información",
@@ -40,6 +31,19 @@ function answerOf(d: Draft | undefined): string {
   return d.choice ?? text;
 }
 
+type TimelineItem =
+  | { type: "message"; key: string; at: string; role: string; who: string; text: string }
+  | { type: "qa"; key: string; at: string; q: Question };
+
+/** Mensajes y preguntas respondidas, en el orden en que ocurrieron. */
+function timeline(messages: NonNullable<StageCtx["view"]["messages"]>, closed: Question[]): TimelineItem[] {
+  const items: TimelineItem[] = [
+    ...messages.map((m) => ({ type: "message" as const, key: m.id, at: m.created_at, role: m.role, who: m.author?.name ?? "Equipo", text: m.content })),
+    ...closed.map((q) => ({ type: "qa" as const, key: q.id, at: q.answered_at ?? q.created_at, q })),
+  ];
+  return items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+}
+
 export default function ProductStage({ ctx }: { ctx: StageCtx }) {
   const { project, view, editable, run, working, setDirty } = ctx;
   const brief: Brief = view.content.brief;
@@ -64,11 +68,6 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
     setDirty(ready.length > 0 || message.trim().length > 0);
   }, [ready.length, message, setDirty]);
 
-  const setDraft = (q: Question, patch: Partial<Draft>) =>
-    setDrafts((d) => {
-      const base: Draft = d[q.id] ?? { choice: null, text: "", delegate: false };
-      return { ...d, [q.id]: { ...base, ...patch } };
-    });
 
   if (!started) {
     return (
@@ -93,22 +92,29 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
     );
   }
 
-  const submit = () =>
-    run(
-      () =>
-        api.productTurn(
-          project.id,
-          view.version,
-          ready.map((q) => ({ question_id: q.id, answer: answerOf(drafts[q.id]) })),
-          message.trim() || null,
-        ),
-      "Respuestas procesadas.",
-    );
+  const submit = (extra?: { id: string; answer: string }) => {
+    const answers = ready.map((q) => ({ question_id: q.id, answer: answerOf(drafts[q.id]) }));
+    if (extra && !answers.some((a) => a.question_id === extra.id)) answers.push({ question_id: extra.id, answer: extra.answer });
+    // Si el texto ya se usó como respuesta a una pregunta, no se manda además como mensaje suelto.
+    const note = extra ? null : message.trim() || null;
+    return run(() => api.productTurn(project.id, view.version, answers, note), "Listo, Plano actualizó la definición.");
+  };
+
+  // La pregunta actual del chat: primero las bloqueantes, una a la vez.
+  const current = open.find((q) => !answerOf(drafts[q.id]));
+  const answeredNow = open.filter((q) => answerOf(drafts[q.id]));
+  const answerCurrent = (q: Question, answer: string) => {
+    const next = { ...drafts, [q.id]: { choice: answer, text: "", delegate: answer === DELEGATED } };
+    setDrafts(next);
+    setMessage("");
+    // Al responder la última pregunta de la ronda, se envía sola: nada de botones extra.
+    if (open.every((x) => x.id === q.id || answerOf(next[x.id]))) void submit({ id: q.id, answer });
+  };
 
   return (
     <>
       <StageIntro title="Definición del producto">
-        Ronda {view.content.round}. Responde las preguntas; las bloqueantes deben resolverse antes de aprobar la etapa. Si prefieres que Plano decida, usa «Que decida Plano» y quedará registrado como decisión delegada.
+        Plano te hace preguntas cortas, como en un chat. Responde con un clic o escribiendo; si no sabes, toca «Que decida Plano». Cuando no queden preguntas, aprueba y la IA arma el resto sola.
       </StageIntro>
 
       {view.content.contradictions?.length > 0 && (
@@ -122,113 +128,141 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
         </div>
       )}
 
-      {pending.length > 0 && (
-        <div className="banner info">
-          Hay {pending.length} respuesta(s) guardada(s) que la IA aún no procesa.
-          {canWork && (
-            <button className="btn secondary small" disabled={working} onClick={() => run(() => api.productTurn(project.id, view.version, [], null), "Respuestas procesadas.")}>
-              Procesar ahora
-            </button>
-          )}
+      <section className="chatbox" aria-label="Conversación con Plano">
+        <div className="bubble user">
+          <span className="who">Idea</span>
+          {project.idea}
         </div>
-      )}
-
-      <section className="section">
-        <h3>{open.length ? `Preguntas abiertas (${open.length})` : "Preguntas abiertas"}</h3>
-        {open.length === 0 && <p className="muted">No hay preguntas pendientes. Revisa la definición y, si está completa, apruébala.</p>}
-        {open.map((q) => {
-          const d = drafts[q.id];
-          return (
-            <article key={q.id} className={`question ${q.blocking ? "blocking" : ""}`} aria-label={`Pregunta ${q.code}`}>
-              <div className="qhead">
-                <span className="code">{q.code}</span>
-                {q.blocking && <span className="mark-blocking">Bloqueante</span>}
-                <span className="tags">
-                  {q.affects.map((a) => (
-                    <span key={a} className="tag">
-                      {AFFECTS[a] ?? a}
-                    </span>
-                  ))}
-                </span>
-              </div>
-              <div className="text">{q.text}</div>
-              {q.rationale && <p className="why">{q.rationale}</p>}
-              {canWork && (
-                <>
-                  {q.options.length > 0 && (
-                    <div className="options" role="group" aria-label="Opciones sugeridas">
-                      {q.options.map((o) => (
-                        <button
-                          key={o}
-                          type="button"
-                          className="option"
-                          aria-pressed={d?.choice === o && !d.delegate}
-                          onClick={() => setDraft(q, { choice: d?.choice === o ? null : o, delegate: false })}
-                        >
-                          {o}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <label className="sr-only" htmlFor={`ans-${q.id}`}>
-                    Respuesta a {q.code}
-                  </label>
-                  <textarea
-                    id={`ans-${q.id}`}
-                    rows={2}
-                    value={d?.text ?? ""}
-                    disabled={d?.delegate}
-                    onChange={(e) => setDraft(q, { text: e.target.value, delegate: false })}
-                    placeholder={q.options.length ? "Precisa o explica tu elección (opcional)" : "Tu respuesta"}
-                  />
-                  <div className="row" style={{ marginTop: 8 }}>
-                    <button type="button" className="option" aria-pressed={!!d?.delegate} onClick={() => setDraft(q, { delegate: !d?.delegate })}>
-                      Que decida Plano
-                    </button>
-                    {!q.blocking && (
-                      <button type="button" className="btn ghost small" disabled={working} onClick={() => run(() => api.dismissQuestion(project.id, q.id, "No aplica para el MVP"), "Pregunta descartada.")}>
-                        Descartar
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-            </article>
-          );
-        })}
-        {canWork && (
-          <div className="box" style={{ marginTop: 6 }}>
-            <div className="field">
-              <label htmlFor="msg">Algo más que Plano deba saber (opcional)</label>
-              <textarea id="msg" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Ej.: cambiamos de idea, el MVP no incluye pagos" />
+        {timeline(view.messages ?? [], closed).map((item) =>
+          item.type === "message" ? (
+            <div key={item.key} className={`bubble ${item.role}`}>
+              <span className="who">{item.role === "assistant" ? "Plano" : item.who}</span>
+              {item.text}
             </div>
-            <button className="btn" disabled={working || (ready.length === 0 && message.trim().length === 0)} onClick={submit}>
-              {ready.length ? `Enviar ${ready.length} respuesta${ready.length === 1 ? "" : "s"}` : "Enviar mensaje"}
-            </button>
+          ) : (
+            <div key={item.key} className="pair">
+              <div className="bubble assistant">
+                <span className="who">Plano · {item.q.code}</span>
+                {item.q.text}
+              </div>
+              <div className="bubble user">
+                <span className="who">{item.q.answered_by?.name ?? "Equipo"}</span>
+                {item.q.status === "dismissed" ? "No aplica" : item.q.answer?.startsWith("[DELEGADO]") ? "Que decida Plano" : item.q.answer}
+              </div>
+            </div>
+          ),
+        )}
+        {answeredNow.map((q) => (
+          <div key={q.id} className="pair">
+            <div className="bubble assistant">
+              <span className="who">Plano · {q.code}</span>
+              {q.text}
+            </div>
+            <div className="bubble user pending">
+              <span className="who">Tú</span>
+              {drafts[q.id]?.delegate ? "Que decida Plano" : answerOf(drafts[q.id])}
+              {canWork && !working && (
+                <button className="linklike" onClick={() => setDrafts((d) => ({ ...d, [q.id]: { choice: null, text: "", delegate: false } }))}>
+                  Cambiar
+                </button>
+              )}
+            </div>
           </div>
+        ))}
+        {pending.length > 0 && !working && (
+          <div className="bubble assistant">
+            Tengo {pending.length} respuesta(s) guardada(s) sin procesar.
+            {canWork && (
+              <button className="btn small" style={{ marginLeft: 8 }} onClick={() => run(() => api.productTurn(project.id, view.version, [], null), "Respuestas procesadas.")}>
+                Procesar ahora
+              </button>
+            )}
+          </div>
+        )}
+        {working && (
+          <div className="bubble assistant typing" aria-live="polite">
+            <span className="dots" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+            Plano está pensando…
+          </div>
+        )}
+        {!working && current && (
+          <div className={`bubble assistant ask ${current.blocking ? "blocking" : ""}`}>
+            <span className="who">
+              Plano · {current.code} · pregunta {open.indexOf(current) + 1} de {open.length}
+              {current.blocking && <span className="mark-blocking">Necesaria</span>}
+            </span>
+            <strong>{current.text}</strong>
+            {current.rationale && <p className="why">{current.rationale}</p>}
+            {canWork && (
+              <div className="options" role="group" aria-label="Respuestas rápidas">
+                {current.options.map((o) => (
+                  <button key={o} type="button" className="option" onClick={() => answerCurrent(current, o)}>
+                    {o}
+                  </button>
+                ))}
+                <button type="button" className="option ghost" onClick={() => answerCurrent(current, DELEGATED)}>
+                  Que decida Plano
+                </button>
+                {!current.blocking && (
+                  <button type="button" className="option ghost" onClick={() => run(() => api.dismissQuestion(project.id, current.id, "No aplica para el MVP"), "Pregunta descartada.")}>
+                    No aplica
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {!working && !current && open.length === 0 && pending.length === 0 && (
+          <div className="bubble assistant done">
+            <span className="who">Plano</span>
+            {view.can_approve
+              ? "¡Tengo todo lo necesario! Revisa la definición abajo y apruébala: después preparo solo el modelo de datos, la API, las pantallas y la arquitectura."
+              : "No me quedan preguntas, pero falta completar algo de la definición: revisa los problemas marcados a la derecha o escríbeme qué cambiar."}
+          </div>
+        )}
+        {canWork && (
+          <form
+            className="composer"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const text = message.trim();
+              if (!text) return;
+              if (current) answerCurrent(current, text);
+              else void submit();
+            }}
+          >
+            <label className="sr-only" htmlFor="composer">
+              Escribe tu respuesta
+            </label>
+            <input
+              id="composer"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder={current ? "Escribe tu respuesta…" : "Escribe un cambio o algo que Plano deba saber…"}
+              disabled={working}
+              autoComplete="off"
+            />
+            <button className="btn" disabled={working || !message.trim()}>
+              Enviar
+            </button>
+            {ready.length > 0 && current && (
+              <button type="button" className="btn secondary" disabled={working} onClick={() => submit()}>
+                Enviar {ready.length} y seguir
+              </button>
+            )}
+          </form>
         )}
       </section>
 
-      {view.messages && view.messages.length > 0 && (
-        <details className="section">
-          <summary>
-            <strong>Conversación</strong> <span className="muted small">({view.messages.length} mensajes)</span>
-          </summary>
-          <div className="chat">
-            {view.messages.map((m) => (
-              <div key={m.id} className={`msg ${m.role}`}>
-                <div className="who">
-                  {m.role === "assistant" ? "Plano" : m.author?.name ?? "Equipo"}, {timeAgo(m.created_at)}
-                </div>
-                <div className="body">{m.content}</div>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-
-      <section className="section">
-        <div className="row between">
+      <details className="section brief-details" open={open.length === 0 && pending.length === 0}>
+        <summary>
+          <strong>Ver la definición completa</strong> <span className="muted small">(lo que Plano entendió hasta ahora)</span>
+        </summary>
+        <div className="row between" style={{ marginTop: 12 }}>
           <h3 style={{ border: 0, margin: 0 }}>Definición actual</h3>
           <div className="row">
             <button className={`btn small ${tab === "read" ? "" : "secondary"}`} onClick={() => setTab("read")}>
@@ -250,27 +284,8 @@ export default function ProductStage({ ctx }: { ctx: StageCtx }) {
             onSave={(data) => run(() => api.saveBrief(project.id, view.version, data), "Definición guardada.")}
           />
         )}
-      </section>
+      </details>
 
-      {closed.length > 0 && (
-        <details className="section">
-          <summary>
-            <strong>Decisiones respondidas</strong> <span className="muted small">({closed.length})</span>
-          </summary>
-          <div style={{ marginTop: 10 }}>
-            {closed.map((q) => (
-              <div key={q.id} className="req">
-                <span className="rid">{q.code}</span>
-                <strong>{q.text}</strong>
-                <div className="answered">
-                  {q.status === "dismissed" ? "Descartada" : "Respuesta"}: <strong>{q.answer?.startsWith("[DELEGADO]") ? "Delegada a Plano" : q.answer}</strong>
-                  {q.answered_by && <span className="muted"> ({q.answered_by.name}, {timeAgo(q.answered_at)})</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
     </>
   );
 }

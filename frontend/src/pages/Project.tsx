@@ -42,7 +42,7 @@ function changed(a: SyncState, b: SyncState): boolean {
   return STAGE_ORDER.some((k) => {
     const x = a.stages[k];
     const y = b.stages[k];
-    return !x || !y || x.version !== y.version || x.status !== y.status || x.generating !== y.generating;
+    return !x || !y || x.version !== y.version || x.status !== y.status || x.generating !== y.generating || x.auto_error !== y.auto_error;
   });
 }
 
@@ -60,6 +60,8 @@ export default function ProjectPage() {
   const [panel, setPanel] = useState<"members" | "activity" | null>(null);
   const dirty = useRef(false);
   const sync = useRef<SyncState | null>(null);
+  const viewRef = useRef<StageView | null>(null);
+  viewRef.current = view;
 
   const current: Current = (stage as Current) || project?.current_stage || "product";
 
@@ -112,12 +114,18 @@ export default function ProjectPage() {
         const next = await api.sync(projectId);
         const prev = sync.current;
         sync.current = next;
+        // La etapa en pantalla puede haber quedado atrás (por ejemplo, la IA terminó justo al cargarla).
+        const shown = viewRef.current;
+        const live = current !== "documents" ? next.stages[current] : undefined;
+        if (shown && live && shown.kind === current && !working && !dirty.current && (live.version !== shown.version || live.generating !== shown.generating)) {
+          await loadStage(current);
+        }
         if (!prev || !changed(prev, next)) return;
         await loadProject();
         if (current !== "documents") {
           const a = prev.stages[current];
           const b = next.stages[current];
-          if (a && b && (a.version !== b.version || a.status !== b.status || a.generating !== b.generating)) {
+          if (a && b && (a.version !== b.version || a.status !== b.status || a.generating !== b.generating || a.auto_error !== b.auto_error)) {
             if (dirty.current && a.version !== b.version) setRemote(`Otra persona guardó una versión más nueva (v${b.version}).`);
             else if (!working) await loadStage(current);
           }
@@ -257,6 +265,23 @@ export default function ProjectPage() {
           ) : ctx ? (
             <>
               {(working || ctx.view.generating) && <Busy />}
+              {ctx.view.content?.auto_error && !ctx.view.generating && (
+                <div className="banner error row between">
+                  <span>La IA no pudo preparar esta etapa: {String(ctx.view.content.auto_error)}</span>
+                  {editable && (
+                    <button
+                      className="btn small"
+                      onClick={async () => {
+                        await api.autopilot(project.id);
+                        toast("Reintentando. La IA vuelve a trabajar en esta etapa.");
+                        await loadStage(current);
+                      }}
+                    >
+                      Reintentar
+                    </button>
+                  )}
+                </div>
+              )}
               {STAGES[current as StageKind](ctx)}
             </>
           ) : (
@@ -317,11 +342,20 @@ function StageStatusBox({ ctx }: { ctx: StageCtx }) {
   const pending = team ? team.people.filter((p) => !p.approved).map((p) => p.user.name.split(" ")[0]) : [];
   const open = view.status === "in_progress" || view.status === "stale";
   const approveLabel = !team || team.required <= 1 ? "Aprobar etapa" : `Aprobar (${team.count} de ${team.required})`;
-  const afterApprove = () =>
-    run(
-      () => api.approve(project.id, view.kind, view.version),
-      !team || team.count + 1 >= team.required ? "Etapa aprobada." : "Tu aprobación quedó registrada. Falta que aprueben los demás.",
-    );
+  const navigate = useNavigate();
+  const afterApprove = async () => {
+    let approved = false;
+    const ok = await run(async () => {
+      const next = await api.approve(project.id, view.kind, view.version);
+      approved = next.status === "approved";
+      return next;
+    }, !team || team.count + 1 >= team.required ? "Etapa aprobada. La IA ya está preparando la siguiente." : "Tu aprobación quedó registrada. Falta que aprueben los demás.");
+    // Con el piloto automático la siguiente etapa ya se está generando: se va directo a verla.
+    if (ok && approved) {
+      const idx = STAGE_ORDER.indexOf(view.kind);
+      navigate(`/p/${project.id}/${idx + 1 < STAGE_ORDER.length ? STAGE_ORDER[idx + 1] : "documents"}`);
+    }
+  };
   return (
     <div className="box">
       <div className="row between" style={{ marginBottom: 8 }}>

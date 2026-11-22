@@ -24,6 +24,7 @@ def settings(tmp_path) -> Settings:
         secret_key="test-secret-key-test-secret-key-0123456789",
         log_level="WARNING",
         login_max_attempts=5,
+        autopilot=False,  # el piloto automático tiene su propia prueba (test_autopilot.py)
     )
 
 

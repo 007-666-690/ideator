@@ -19,8 +19,10 @@ def shot(page, name):
 def approve(page):
     btn = page.get_by_role("button", name="Aprobar etapa")
     expect(btn).to_be_enabled(timeout=15000)
+    before = page.url
     btn.click()
-    expect(page.locator(".stamp").first).to_be_visible(timeout=15000)
+    # Al aprobar, la app pasa sola a la etapa siguiente (que la IA ya está preparando)
+    page.wait_for_function("u => location.href !== u", arg=before, timeout=15000)
 
 
 with sync_playwright() as p:
@@ -42,22 +44,22 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Crear proyecto").click()
 
     page.get_by_role("button", name="Comenzar la definición").click()
-    expect(page.locator(".question").first).to_be_visible(timeout=15000)
-    shot(page, "03-preguntas")
-    # Responder: opción en la primera, delegar la segunda, texto en la tercera
-    q = page.locator(".question")
-    q.nth(0).get_by_role("button", name="Socios y un administrador del club").click()
-    q.nth(1).get_by_role("button", name="Que decida Plano").click()
-    q.nth(2).locator("textarea").fill("60 minutos")
-    page.get_by_role("button", name="Enviar 3 respuestas").click()
-    expect(page.get_by_text("No hay preguntas pendientes")).to_be_visible(timeout=15000)
+    ask = page.locator(".bubble.ask")
+    expect(ask).to_be_visible(timeout=15000)
+    shot(page, "03-chat")
+    # Chat: una opción con un clic, la segunda delegada y la tercera escrita
+    ask.get_by_role("button", name="Socios y un administrador del club").click()
+    ask.get_by_role("button", name="Que decida Plano").click()
+    page.get_by_label("Escribe tu respuesta").fill("60 minutos")
+    page.get_by_role("button", name="Enviar", exact=True).click()  # la última respuesta se envía sola
+    expect(page.locator(".bubble.done")).to_contain_text("Tengo todo lo necesario", timeout=15000)
     shot(page, "04-definicion")
     approve(page)
 
-    for kind, label in (("data_model", "Proponer modelo de datos"), ("api", "Proponer API"), ("frontend", "Proponer pantallas")):
-        page.goto(page.url.rsplit("/", 1)[0] + f"/{kind}")
-        page.get_by_role("button", name=label).click()
-        expect(page.get_by_role("button", name="Aprobar etapa")).to_be_enabled(timeout=15000)
+    # Piloto automático: después de aprobar, la siguiente etapa se genera sola y la app navega a ella
+    for kind in ("data_model", "api", "frontend"):
+        page.wait_for_url(f"**/{kind}", timeout=15000)
+        expect(page.get_by_role("button", name="Aprobar etapa")).to_be_enabled(timeout=30000)
         if kind == "data_model":
             page.wait_for_selector(".entity-card", timeout=15000)
             shot(page, "05-datos-diagrama")
@@ -76,19 +78,13 @@ with sync_playwright() as p:
             shot(page, "09-mapa")
         approve(page)
 
-    page.goto(page.url.rsplit("/", 1)[0] + "/architecture")
-    page.get_by_role("button", name="Evaluar las cinco con IA").click()
-    expect(page.get_by_text("Recomendada")).to_be_visible(timeout=15000)
-    page.get_by_role("button", name="Detallar A1").click()
-    expect(page.get_by_text("Por qué esta arquitectura")).to_be_visible(timeout=15000)
+    page.wait_for_url("**/architecture", timeout=15000)
+    expect(page.get_by_text("Por qué esta arquitectura")).to_be_visible(timeout=30000)  # evaluó, eligió y detalló sola
     shot(page, "10-arquitectura")
     approve(page)
 
-    page.goto(page.url.rsplit("/", 1)[0] + "/review")
-    page.get_by_role("button", name="Ejecutar revisión").click()
-    expect(page.get_by_text("Hallazgos")).to_be_visible(timeout=15000)
-    page.get_by_role("button", name="Aceptar todos los supuestos").click()
-    page.wait_for_timeout(800)
+    page.wait_for_url("**/review", timeout=15000)
+    expect(page.get_by_role("heading", name="Hallazgos")).to_be_visible(timeout=30000)
     page.get_by_role("button", name="Aceptar sin cambios").click()
     page.get_by_label("¿Por qué se acepta sin cambios? Queda registrado.").fill("Se resuelve al implementar")
     page.get_by_role("button", name="Aceptar hallazgo").click()
@@ -96,7 +92,7 @@ with sync_playwright() as p:
     shot(page, "11-revision")
     approve(page)
 
-    page.goto(page.url.rsplit("/", 1)[0] + "/documents")
+    page.wait_for_url("**/documents", timeout=15000)
     page.get_by_role("button", name="Generar documentos").click()
     expect(page.locator(".doc-view h1")).to_be_visible(timeout=15000)
     page.wait_for_timeout(1500)

@@ -49,6 +49,8 @@ class Settings(BaseSettings):
 
     # IA
     llm_provider: str = "fake"  # azure | gemini | fake
+    # Piloto automático: al aprobar una etapa, la IA genera sola la siguiente (y corrige sus errores).
+    autopilot: bool = True
     azure_openai_endpoint: str = ""  # https://<recurso>.openai.azure.com/openai/v1
     azure_openai_api_key: str = ""
     azure_openai_deployment: str = "gpt-5"

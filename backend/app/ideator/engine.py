@@ -76,14 +76,16 @@ logger = logging.getLogger("ideator.engine")
 GENERATION_TIMEOUT = timedelta(minutes=10)
 MAX_NEW_QUESTIONS = 5
 UPSTREAM: dict[str, list[str]] = {kind: list(STAGE_KINDS[:i]) for i, kind in enumerate(STAGE_KINDS)}
+# Esfuerzo de razonamiento por tarea. "low" en todo: con "medium" cada etapa tardaba 1 a 2 minutos más
+# y los errores que deja "low" los atrapa la validación automática y se corrigen solos (auto_fix).
 EFFORT = {
     "product_turn": "low",
-    "data_model": "medium",
-    "api_spec": "medium",
+    "data_model": "low",
+    "api_spec": "low",
     "frontend_spec": "low",
     "architecture_eval": "low",
     "architecture_spec": "low",
-    "consistency_review": "medium",
+    "consistency_review": "low",
 }
 GENERATION_TASKS: dict[str, tuple[str, type[BaseModel], str]] = {
     "data_model": ("data_model", DataModel, prompts.DATA_MODEL_SYSTEM),
@@ -190,6 +192,7 @@ def require_upstream_approved(stages: dict[str, Stage], kind: str) -> None:
 
 
 def commit_revision(db: Session, stage: Stage, content: dict[str, Any], user: User, source: str, summary: str) -> None:
+    content = {k: v for k, v in content.items() if k != "auto_error"}  # un avance borra el error del piloto
     stage.content = copy.deepcopy(content)
     stage.version += 1
     stage.updated_by = user.id
@@ -237,6 +240,24 @@ def evaluation_of(stage: Stage) -> ArchitectureEvaluation | None:
 
 def _call(llm: LLMClient, task: str, system: str, user_prompt: str, schema: type[BaseModel]) -> Any:
     return llm.complete(task=task, system=system, user=user_prompt, schema=schema, effort=EFFORT.get(task))
+
+
+def _auto_fix(llm: LLMClient, task: str, system: str, schema: type[BaseModel], result: Any, errors_of, prompt_for) -> Any:
+    """Si la propuesta tiene errores de validación, la IA los corrige una vez sobre su propio resultado.
+
+    Antes el equipo tenía que apretar "Corregir con IA" y esperar otra generación completa.
+    Si la corrección falla o deja más errores, se conserva la versión con menos errores.
+    """
+    errors = errors_of(result)
+    if not errors:
+        return result
+    instructions = "Corrige estos problemas detectados en la validación, manteniendo todo lo demás igual:\n" + "\n".join(f"- {e}" for e in errors[:25])
+    try:
+        fixed = _call(llm, task, system, prompt_for(result, instructions), schema)
+    except LLMError:
+        logger.warning("No se pudo corregir automáticamente %s", task)
+        return result
+    return fixed if len(errors_of(fixed)) <= len(errors) else result
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +407,7 @@ def stage_summary(stage: Stage) -> dict[str, Any]:
         "version": stage.version,
         "updated_at": iso(stage.updated_at),
         "generating": is_generating(stage),
+        "auto_error": stage.content.get("auto_error"),
     }
 
 
@@ -675,9 +697,26 @@ def generate_stage(db: Session, llm: LLMClient, project: Project, user: User, ki
     else:
         user_prompt = prompts.frontend_user_prompt(up["brief"], up["api"], current, instructions)
 
+    def prompt_for(cur: Any, instr: str | None) -> str:
+        if kind == "data_model":
+            return prompts.data_model_user_prompt(up["brief"], cur, instr)
+        if kind == "api":
+            return prompts.api_user_prompt(up["brief"], up["model"], cur, instr)
+        return prompts.frontend_user_prompt(up["brief"], up["api"], cur, instr)
+
+    def errors_of(obj: Any) -> list[str]:
+        if kind == "data_model":
+            found = validate_data_model(obj, up["brief"])
+        elif kind == "api":
+            found = validate_api(obj, up["model"], up["brief"])
+        else:
+            found = validate_frontend(obj, up["api"], up["brief"])
+        return [i["message"] for i in found if i["severity"] == "error"]
+
     begin_generation(db, stage)
     try:
         result = _call(llm, task, system, user_prompt, schema)
+        result = _auto_fix(llm, task, system, schema, result, errors_of, prompt_for)
     except LLMError as exc:
         end_generation(db, stage)
         raise llm_failure(exc) from exc
@@ -790,9 +829,16 @@ def architecture_generate(db: Session, llm: LLMClient, project: Project, user: U
     user_prompt = prompts.arch_spec_user_prompt(
         up["brief"], up["model"], up["api"], up["frontend"], scenario, evaluation_of(stage), current, instructions
     )
+    def arch_prompt(cur: Any, instr: str | None) -> str:
+        return prompts.arch_spec_user_prompt(up["brief"], up["model"], up["api"], up["frontend"], scenario, evaluation_of(stage), cur, instr)
+
+    def arch_errors(obj: Any) -> list[str]:
+        return [i["message"] for i in validate_architecture(obj, ARCHITECTURE_IDS) if i["severity"] == "error"]
+
     begin_generation(db, stage)
     try:
         spec: ArchitectureSpec = _call(llm, "architecture_spec", prompts.ARCH_SPEC_SYSTEM, user_prompt, ArchitectureSpec)
+        spec = _auto_fix(llm, "architecture_spec", prompts.ARCH_SPEC_SYSTEM, ArchitectureSpec, spec, arch_errors, arch_prompt)
     except LLMError as exc:
         end_generation(db, stage)
         raise llm_failure(exc) from exc
@@ -863,6 +909,19 @@ def approve_stage(db: Session, project: Project, user: User, kind: str, version:
     if is_generating(stage):
         raise ApiError(409, "generation_in_progress", "La IA está trabajando en esta etapa. Espera a que termine.")
     require_upstream_approved(stages, kind)
+    if kind == "product":
+        # Los supuestos se ven en la definición: aprobarla los acepta. Así las etapas siguientes los aplican
+        # desde el principio y la revisión final no se traba esperando que alguien los acepte.
+        brief = brief_of(stage)
+        pending_ids = [a.id for a in brief.assumptions if not a.accepted]
+        if pending_ids:
+            for a in brief.assumptions:
+                a.accepted = True
+            content = copy.deepcopy(stage.content)
+            content["brief"] = brief.model_dump(mode="json")
+            commit_revision(db, stage, content, user, "user", f"Supuestos aceptados al aprobar: {', '.join(pending_ids)}")
+            log_activity(db, project.id, user, "assumptions.accepted", {"ids": pending_ids})
+            db.flush()
     issues, _ = stage_issues(db, project, stages, kind)
     errors = [i for i in issues if i["severity"] == "error"]
     if errors:

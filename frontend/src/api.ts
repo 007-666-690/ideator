@@ -119,6 +119,7 @@ export const api = {
     post<StageView>(`${p(id)}/stages/${kind}/generate`, { version, instructions }),
   saveStage: (id: string, kind: StageKind, version: number, data: unknown, summary?: string) =>
     put<StageView>(`${p(id)}/stages/${kind}`, { version, data, summary: summary ?? null } as Json),
+  autopilot: (id: string) => post<{ ok: boolean; enabled: boolean }>(`${p(id)}/autopilot`, {}),
   approve: (id: string, kind: StageKind, version: number) => post<StageView>(`${p(id)}/stages/${kind}/approve`, { version }),
   reopen: (id: string, kind: StageKind, version: number) => post<StageView>(`${p(id)}/stages/${kind}/reopen`, { version }),
   withdrawApproval: (id: string, kind: StageKind) => del<StageView>(`${p(id)}/stages/${kind}/approval`),

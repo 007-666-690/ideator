@@ -137,7 +137,7 @@ def validate_product(brief: ProductBrief, open_blocking: int) -> list[Issue]:
             issue(
                 "warning",
                 "product.pending_assumptions",
-                f"Supuestos sin aceptar: {', '.join(pending)}. Debes aceptarlos o corregirlos antes de generar los documentos.",
+                f"Supuestos propuestos: {', '.join(pending)}. Se aceptan al aprobar la definición; si alguno no te sirve, corrígelo antes.",
                 "assumptions",
             )
         )
@@ -344,7 +344,10 @@ def validate_api(spec: ApiSpec, model: DataModel | None, brief: ProductBrief | N
             issues.append(issue("warning", "api.duplicate_status", f"{where}: hay códigos de respuesta repetidos", ep.id))
         if ep.auth == "authenticated" and 401 not in status_set:
             issues.append(issue("error", "api.missing_401", f"{where}: requiere sesión pero no documenta 401", ep.id))
-        restricted = ep.auth == "authenticated" and (ep.allowed_roles != ["*"] or _filled(ep.authorization_rule))
+        # 403 solo es posible si hay usuarios autenticados que no entran (otro rol) o una regla sobre un recurso
+        # de la ruta (ej. "solo el dueño"). Un endpoint como /me o /sessions/current no puede responder 403.
+        excluded_roles = ep.allowed_roles != ["*"] and bool(roles - set(ep.allowed_roles))
+        restricted = ep.auth == "authenticated" and (excluded_roles or (_filled(ep.authorization_rule) and bool(in_path)))
         if restricted and 403 not in status_set:
             issues.append(issue("error", "api.missing_403", f"{where}: tiene restricción de permisos pero no documenta 403", ep.id))
         if in_path and 404 not in status_set:

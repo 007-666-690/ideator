@@ -75,21 +75,16 @@ def test_full_flow_generates_documents(client):
     assert arch["content"]["data"]["scenario_id"] == "A1"
     approve(client, pid, "architecture")
 
-    # Revisión: bloquea hasta aceptar supuestos
+    # Revisión: los supuestos ya quedaron aceptados al aprobar la definición
+    assert all(a["accepted"] for a in stage(client, pid, "product")["content"]["brief"]["assumptions"])
     rv = stage(client, pid, "review")
     r = client.post(f"/api/projects/{pid}/review/run", json={"version": rv["version"]})
     assert r.status_code == 200
     rv = r.json()
     assert rv["content"]["findings"][0]["source"] == "ia"
-    assert any(i["code"] == "review.assumptions" for i in rv["issues"])
+    assert not any(i["code"] == "review.assumptions" for i in rv["issues"])
     r = client.post(f"/api/projects/{pid}/documents")
-    assert r.status_code == 409
-
-    product = stage(client, pid, "product")
-    r = client.post(f"/api/projects/{pid}/product/assumptions/accept", json={"version": product["version"], "ids": None})
-    assert r.status_code == 200
-    assert r.json()["status"] == "approved"
-    rv = stage(client, pid, "review")
+    assert r.status_code == 409  # la revisión todavía no está aprobada
     assert not [i for i in rv["issues"] if i["severity"] == "error"], rv["issues"]
 
     # Hallazgo de la IA aceptado con justificación
