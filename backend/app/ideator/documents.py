@@ -63,6 +63,11 @@ def _roles_text(roles: list[str], names: dict[str, str]) -> str:
     return ", ".join(out)
 
 
+def uses_sso(api: ApiSpec) -> bool:
+    """El producto usa SSO solo si la API aprobada tiene endpoints de SSO."""
+    return any("/sso" in ep.path.lower() for ep in api.endpoints)
+
+
 def _req_links(api: ApiSpec, fe: FrontendSpec) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     """Mapea cada requisito a sus endpoints y pantallas."""
     req_eps: dict[str, list[str]] = {}
@@ -495,6 +500,7 @@ def architecture_markdown(
 ) -> str:
     names = _user_names(brief)
     scenario = get_architecture(spec.scenario_id) or {"name": spec.scenario_id}
+    sso = uses_sso(api)
     out: list[str] = []
     w = out.append
     w(f"# {brief.product_name or project_name} — Arquitectura")
@@ -511,7 +517,12 @@ def architecture_markdown(
             [
                 "Usa exactamente el stack y las versiones de §2. No sustituyas tecnologías ni agregues servicios no listados.",
                 "Respeta la estructura del repositorio de §4 y las variables de entorno de §10 (mismos nombres).",
-                "Implementa autenticación, SSO y autorización como indica §9: la autorización se valida en el backend en cada endpoint.",
+                (
+                    "Implementa autenticación, SSO y autorización como indica §9: la autorización se valida en el backend en cada endpoint."
+                    if sso
+                    else "Implementa autenticación y autorización como indica §9 (este producto no usa SSO): la autorización se valida en el backend en cada endpoint."
+                ),
+                "Los códigos de respuesta de cada endpoint son los de `especificacion-producto.md` §10; si algo de este documento parece contradecirlos, manda §10.",
                 "Los secretos nunca van en el código ni en el repositorio: se leen de variables de entorno o del gestor de secretos.",
                 "Incluye health checks, logs estructurados y las pruebas de §12 y §13 como parte de la entrega.",
                 "Antes de terminar, recorre la checklist de §16.",
@@ -584,20 +595,21 @@ def architecture_markdown(
     w("")
     w(spec.communication)
     w("")
-    w("## 9. Autenticación, SSO y autorización")
+    w("## 9. Autenticación, SSO y autorización" if sso else "## 9. Autenticación y autorización")
     w("")
     w("### Autenticación")
     w("")
     w(spec.authentication)
     w("")
-    w("### Single Sign-On")
-    w("")
-    w(spec.sso)
-    w("")
-    w("```mermaid")
-    w(SSO_SEQUENCE)
-    w("```")
-    w("")
+    if sso:
+        w("### Single Sign-On")
+        w("")
+        w(spec.sso)
+        w("")
+        w("```mermaid")
+        w(SSO_SEQUENCE)
+        w("```")
+        w("")
     w("### Autorización")
     w("")
     w(spec.authorization)
@@ -663,8 +675,8 @@ def architecture_markdown(
                 "La aplicación levanta en local siguiendo §11 y todas las variables de §10 están documentadas en un `.env.example`.",
                 "Las migraciones crean exactamente el esquema de `especificacion-producto.md` §9.",
                 "Cada endpoint de `especificacion-producto.md` §10 existe con su método, ruta, validaciones y códigos de respuesta.",
-                "Una solicitud sin sesión recibe 401; una con sesión pero sin permiso sobre el recurso recibe 403; un recurso inexistente recibe 404.",
-                "El inicio de sesión con SSO funciona con el proveedor configurado.",
+                "Cada endpoint responde exactamente los códigos documentados en `especificacion-producto.md` §10 (401 sin sesión, 403 sin permiso, 404 inexistente, según corresponda).",
+                *(["El inicio de sesión con SSO funciona con el proveedor configurado."] if sso else []),
                 "Los health checks responden y los logs son estructurados.",
                 "Todas las pruebas automatizadas pasan.",
             ]

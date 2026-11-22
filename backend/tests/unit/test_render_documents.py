@@ -77,7 +77,27 @@ def test_architecture_document():
     assert "| `SECRET_KEY` | Firma de los JWT | (definir en el gestor de secretos) | Sí | Sí |" in md
     assert "sequenceDiagram" in md
     assert "EP-10 `POST /api/v1/reservations/{reservation_id}/cancel`" in md
-    assert "- [ ] Una solicitud sin sesión recibe 401" in md
+    assert "- [ ] Cada endpoint responde exactamente los códigos documentados" in md
+    # La API de ejemplo tiene SSO con Google: la sección y la checklist lo incluyen
+    assert "## 9. Autenticación, SSO y autorización" in md and "El inicio de sesión con SSO funciona" in md
+
+
+def test_architecture_without_sso_omits_sso_sections():
+    api = API.model_copy(deep=True)
+    api.endpoints = [ep for ep in api.endpoints if "/sso" not in ep.path]
+    md = architecture_markdown(project_name="Club", brief=BRIEF, api=api, spec=ARCH, evaluation=EVAL, version=1, generated_at=NOW)
+    assert "## 9. Autenticación y autorización" in md
+    assert "sequenceDiagram" not in md and "Single Sign-On" not in md
+    assert "SSO funciona" not in md
+    assert "este producto no usa SSO" in md
+
+
+def test_review_flags_stages_that_reject_assumptions():
+    from app.ideator.engine import rejects_assumptions
+
+    assert rejects_assumptions({"notes": ["No se adopta el mínimo de 12 caracteres porque figura como supuesto no aceptado."]})
+    assert rejects_assumptions({"notes": ["la paginación de 20 y el orden alfabético aparecen como supuestos no aceptados"]})
+    assert not rejects_assumptions({"notes": ["Se aplica el supuesto S-04: 20 por página."]})
 
 
 def test_markdown_tables_escape_pipes():

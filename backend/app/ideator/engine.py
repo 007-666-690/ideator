@@ -324,11 +324,34 @@ def stage_issues(db: Session, project: Project, stages: dict[str, Stage], kind: 
     open_critical = [f for f in content.get("findings", []) if f["severity"] == "critica" and f["status"] == "open"]
     for f in open_critical:
         issues.append(issue("error", "review.critical", f"{f['id']}: {f['description']}", f["id"]))
+    for k in ("data_model", "api", "frontend", "architecture"):
+        if k in stages and rejects_assumptions(stages[k].content):
+            issues.append(
+                issue(
+                    "error",
+                    "review.assumptions_contradicted",
+                    f"«{STAGE_LABELS[k]}» dice que hay supuestos no aceptados y no los aplica. "
+                    "Reábrela y pide a la IA que aplique los supuestos de la definición.",
+                )
+            )
     pending = [a.id for a in brief.assumptions if not a.accepted]
     if pending:
         issues.append(issue("error", "review.assumptions", f"Supuestos sin aceptar: {', '.join(pending)}"))
     extra["assumptions"] = [a.model_dump() for a in brief.assumptions]
     return issues, extra
+
+
+_REJECTED_ASSUMPTION = __import__("re").compile(
+    r"supuestos?\b[^.]{0,120}?\bno\s+(?:fue|fueron|ha\s+sido|han\s+sido|est[aá]n?\s+)?\s*aceptad|no\s+aceptad\w*\s+(?:como\s+)?supuesto",
+    __import__("re").IGNORECASE,
+)
+
+
+def rejects_assumptions(content: Any) -> bool:
+    """True si el contenido de una etapa trata los supuestos de la definición como rechazados."""
+    import json as _json
+
+    return bool(_REJECTED_ASSUMPTION.search(_json.dumps(content, ensure_ascii=False)))
 
 
 def stage_view(db: Session, project: Project, stages: dict[str, Stage], kind: str) -> dict[str, Any]:

@@ -124,7 +124,8 @@ REGLAS
 - Agrega índices para FKs usadas en búsquedas y para los filtros que piden los requisitos; restricciones únicas y CHECK para las reglas de negocio que la base pueda garantizar (ej. price >= 0, ends_at > starts_at).
 - Los tipos de usuario y permisos de la definición deben reflejarse (columna de rol, o tablas de membresía si el acceso es por recurso). Si hay login con contraseña, guarda solo password_hash; si hay SSO, guarda proveedor e identificador externo.
 - Las reglas de negocio que no se pueden garantizar en la base van en "notes", indicando que se validan en el backend.
-- "summary": explicación general del modelo en 3 a 6 frases."""
+- "summary": explicación general del modelo en 3 a 6 frases.
+- SUPUESTOS: los "assumptions" de la definición son valores por defecto vigentes, estén o no marcados accepted. Aplícalos tal cual (límites de largo, paginación, orden, normalización de textos, idioma). Nunca escribas que un supuesto "no fue aceptado" ni diseñes en contra de uno; si un supuesto choca con un requisito, manda el requisito y explícalo en las notas."""
 
 
 def data_model_user_prompt(brief: BaseModel, current: BaseModel | None, instructions: str | None) -> str:
@@ -167,7 +168,8 @@ REGLAS
 - request_body y fields de respuesta: tipo, obligatoriedad y validación de cada campo (largo, formato, rango, enum).
 - Listados: filtros por query y respuesta "paginated" cuando puedan crecer.
 - "conventions.error_format": un ejemplo JSON del formato único de error (con code, message y details).
-- No agregues funcionalidades fuera del MVP."""
+- No agregues funcionalidades fuera del MVP.
+- SUPUESTOS: los "assumptions" de la definición son valores por defecto vigentes, estén o no marcados accepted. Aplícalos tal cual (límites de largo, paginación, orden, normalización de textos, idioma). Nunca escribas que un supuesto "no fue aceptado" ni diseñes en contra de uno; si un supuesto choca con un requisito, manda el requisito y explícalo en las notas."""
 
 
 def api_user_prompt(brief: BaseModel, model: BaseModel, current: BaseModel | None, instructions: str | None) -> str:
@@ -201,7 +203,8 @@ REGLAS
 - "sections": qué se ve (formularios con sus campos, tablas con columnas, detalles, filtros) y qué acciones hay.
 - "states": qué se muestra cuando no hay datos, mientras carga y si hay error (incluye sin permisos y no encontrado cuando aplique).
 - "navigation": todas las transiciones entre pantallas (incluye volver y el menú principal), con el disparador.
-- "layout": estructura global (cabecera, menú, qué opciones ve cada rol)."""
+- "layout": estructura global (cabecera, menú, qué opciones ve cada rol).
+- SUPUESTOS: los "assumptions" de la definición son valores por defecto vigentes, estén o no marcados accepted. Aplícalos tal cual (límites de largo, paginación, orden, normalización de textos, idioma). Nunca escribas que un supuesto "no fue aceptado" ni diseñes en contra de uno; si un supuesto choca con un requisito, manda el requisito y explícalo en las notas."""
 
 
 def frontend_user_prompt(brief: BaseModel, api: BaseModel, current: BaseModel | None, instructions: str | None) -> str:
@@ -268,8 +271,8 @@ REGLAS
 - "backend" y "frontend": estructura en capas, validación, manejo de errores, rutas, estado, cliente HTTP.
 - "communication": protocolo, formato, CORS, tiempo real si aplica.
 - "authentication": cómo se valida la identidad (contraseñas con hash argon2/bcrypt si hay login propio), cómo se emite y valida la sesión o token (tipo, duración, almacenamiento: cookie HttpOnly o header), cierre de sesión.
-- "sso": proveedor OIDC, flujo authorization code con PKCE, URIs de callback, claims usados, cómo se vincula o crea el usuario local.
-- "authorization": modelo de roles y permisos por recurso, verificación en el backend en cada endpoint, y cuándo se responde 401 (sin identidad válida), 403 (autenticado sin permiso) y 404 (recurso inexistente).
+- "sso": si la API tiene endpoints de SSO: proveedor OIDC, flujo authorization code con PKCE, URIs de callback, claims usados, cómo se vincula o crea el usuario local. Si la API NO tiene endpoints de SSO, escribe "No aplica: el producto no usa SSO." y una frase con el motivo; no describas flujos ni proveedores.
+- "authorization": modelo de roles y permisos por recurso, verificación en el backend en cada endpoint, y cuándo se responde 401, 403 y 404. Usa EXACTAMENTE los códigos que la API aprobada documenta para cada endpoint (CODIGOS_POR_ENDPOINT): no cambies un 403 por 404 (ni al revés) "para evitar enumeración" ni por ningún otro motivo.
 - "configuration": todas las variables de entorno (nombre en MAYÚSCULAS, descripción, ejemplo, secret, required). Los secretos van marcados secret=true.
 - "environments": desarrollo, pruebas y producción, con sus diferencias.
 - "deployment": Dockerfiles, servicios de docker-compose, hosting, cómo se inyectan secretos, CI/CD.
@@ -294,6 +297,12 @@ def arch_spec_user_prompt(
         f"ESCENARIO_SELECCIONADO: {scenario['id']}\n{json.dumps(scenario, ensure_ascii=False)}",
         f"PRODUCTO (resumen JSON):\n{_architecture_context(brief, model, api, fe)}",
         f"CONVENCIONES DE LA API (JSON):\n{dump(api.model_dump(mode='json')['conventions'])}",
+        "CODIGOS_POR_ENDPOINT (la arquitectura debe respetarlos):\n"
+        + "\n".join(
+            f"- {e['id']} {e['method']} {e['path']}: " + ", ".join(str(r["status"]) for r in e["responses"])
+            for e in api.model_dump(mode="json")["endpoints"]
+        ),
+        "SSO: " + ("la API tiene endpoints de SSO." if any("/sso" in e.path.lower() for e in api.endpoints) else "la API NO tiene endpoints de SSO: el campo sso debe decir que no aplica."),
     ]
     if evaluation is not None:
         parts.append(f"EVALUACIÓN DE ESCENARIOS (JSON):\n{dump(evaluation)}")
@@ -315,7 +324,8 @@ Busca SOLO problemas reales y concretos:
 - Contradicciones entre etapas (roles o permisos distintos, campos que una pantalla muestra pero ningún endpoint entrega, endpoints que usan datos que no están en el modelo, reglas de negocio que nadie hace cumplir).
 - Requisitos, pasos del recorrido o casos borde sin implementación clara.
 - Decisiones importantes que faltan y que obligarían a la IA implementadora a inventar (formato de un dato, qué pasa en un error, quién puede hacer algo).
-- Una arquitectura que no soporta algo que el producto necesita.
+- Una arquitectura que no soporta algo que el producto necesita, o que contradice a la API (por ejemplo, otro código de respuesta para el mismo caso, o SSO cuando la API no lo tiene).
+- Etapas que contradicen los supuestos de la definición (por ejemplo, otra paginación, otros límites o que digan que un supuesto "no se aceptó").
 
 Severidad: "critica" si la IA implementadora tendría que inventar una decisión importante o el producto no funcionaría; "importante" si es probable un error o una ambigüedad relevante; "menor" para detalles. No repitas los problemas automáticos que ya se te entregan. Máximo 12 hallazgos; si todo es consistente devuelve la lista vacía. Cada hallazgo indica el área y una sugerencia concreta de qué cambiar y en qué etapa. "summary": 1 a 2 frases. Responde en español."""
 
