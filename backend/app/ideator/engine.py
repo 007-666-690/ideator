@@ -1077,7 +1077,21 @@ def run_review(db: Session, llm: LLMClient, project: Project, user: User, versio
         "pantallas": up["frontend"].model_dump(mode="json") if up["frontend"] else None,
         "arquitectura": arch.model_dump(mode="json") if arch else None,
     }
-    user_prompt = prompts.review_user_prompt(artifacts, automatic_errors + warnings)
+    # Memoria entre revisiones: lo ya corregido o aceptado no se vuelve a discutir, y desde la 2ª vuelta
+    # la IA solo reporta problemas graves nuevos (si no, cada revisión inventa hallazgos distintos sin fin).
+    history: list[str] = []
+    runs = 0
+    for rev in db.scalars(select(StageRevision).where(StageRevision.stage_id == stage.id).order_by(StageRevision.version)).all():
+        if rev.source == "ai":
+            runs += 1
+        for f in (rev.content or {}).get("findings", []):
+            if f.get("source") == "ia" and f.get("status") in ("resolved", "accepted"):
+                line = f"{f['description']} (estado: {'corregido' if f['status'] == 'resolved' else 'aceptado sin cambios'})"
+                if line not in history:
+                    history.append(line)
+    history = history[-40:]
+    round_number = runs + 1
+    user_prompt = prompts.review_user_prompt(artifacts, automatic_errors + warnings, history, round_number)
 
     begin_generation(db, stage)
     try:
@@ -1112,6 +1126,8 @@ def run_review(db: Session, llm: LLMClient, project: Project, user: User, versio
             }
         )
     for f in review.findings:
+        if round_number > 1 and f.severity == "menor":
+            continue  # desde la 2ª vuelta los detalles menores no se reportan
         n += 1
         prev = previous.get(f.description)
         findings.append(
@@ -1130,6 +1146,7 @@ def run_review(db: Session, llm: LLMClient, project: Project, user: User, versio
         "summary": review.summary,
         "ran_at": iso(utcnow()),
         "based_on": {k: stages[k].version for k in STAGE_KINDS[:-1]},
+        "round": round_number,
     }
     commit_revision(db, stage, content, user, "ai", f"Revisión de consistencia: {len(findings)} hallazgo(s)")
     stage.generating_since = None
@@ -1166,6 +1183,8 @@ FIXABLE_KINDS = ("data_model", "api", "frontend", "architecture")
 def finding_target(finding: dict) -> str | None:
     """Etapa que la IA puede corregir para un hallazgo (None si no aplica, p. ej. la definición)."""
     area = (finding.get("area") or "").lower()
+    if area == "transversal":
+        return "architecture"  # lo transversal (roles en el token, códigos, seguridad) se cierra en la arquitectura
     kind = finding.get("stage") or KIND_BY_AREA.get(area) or next((k for a, k in KIND_BY_AREA.items() if a in area), None)
     return kind if kind in FIXABLE_KINDS else None
 

@@ -14,6 +14,7 @@ const AREA_STAGE: Record<string, string> = {
   pantallas: "frontend",
   arquitectura: "architecture",
   pruebas: "testing",
+  transversal: "architecture",
 };
 
 // Áreas que la IA puede corregir sola (la definición se ajusta conversando en su chat).

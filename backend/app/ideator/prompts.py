@@ -328,12 +328,21 @@ Busca SOLO problemas reales y concretos:
 - Una arquitectura que no soporta algo que el producto necesita, o que contradice a la API (por ejemplo, otro código de respuesta para el mismo caso, o SSO cuando la API no lo tiene).
 - Etapas que contradicen los supuestos de la definición (por ejemplo, otra paginación, otros límites o que digan que un supuesto "no se aceptó").
 
-Severidad: "critica" si la IA implementadora tendría que inventar una decisión importante o el producto no funcionaría; "importante" si es probable un error o una ambigüedad relevante; "menor" para detalles. No repitas los problemas automáticos que ya se te entregan. Máximo 12 hallazgos; si todo es consistente devuelve la lista vacía. Cada hallazgo indica el área y una sugerencia concreta de qué cambiar y en qué etapa. "summary": 1 a 2 frases. Responde en español."""
+Severidad: "critica" si la IA implementadora tendría que inventar una decisión importante o el producto no funcionaría; "importante" si es probable un error o una ambigüedad relevante; "menor" para detalles. No repitas los problemas automáticos que ya se te entregan. No busques mejoras opcionales ni "sería bueno": solo lo que llevaría a una app que no funciona o a una decisión inventada. Máximo 8 hallazgos; si todo es consistente devuelve la lista vacía. Cada hallazgo indica el área y una sugerencia concreta de qué cambiar y en qué etapa. "summary": 1 a 2 frases. Responde en español."""
 
 
-def review_user_prompt(artifacts: dict[str, Any], automatic_issues: list[dict[str, str]]) -> str:
-    return (
+def review_user_prompt(artifacts: dict[str, Any], automatic_issues: list[dict[str, str]], history: list[str] | None = None, round_number: int = 1) -> str:
+    text = (
         f"DEFINICIÓN COMPLETA (JSON):\n{json.dumps(artifacts, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "PROBLEMAS AUTOMÁTICOS YA DETECTADOS (no los repitas):\n"
         + ("\n".join(f"- [{i['severity']}] {i['message']}" for i in automatic_issues) or "- ninguno")
     )
+    if round_number > 1:
+        text += (
+            f"\n\nESTA ES LA REVISIÓN N° {round_number}. El equipo ya corrigió o aceptó estos hallazgos de revisiones anteriores; "
+            "NO los vuelvas a reportar ni con otras palabras:\n"
+            + ("\n".join(f"- {h}" for h in history or []) or "- (ninguno)")
+            + "\nEn esta vuelta reporta SOLO problemas nuevos de severidad «critica» o «importante» que impidan implementar la app. "
+            "No agregues detalles menores ni mejoras opcionales. Si lo anterior quedó resuelto y no hay nada grave, devuelve la lista vacía."
+        )
+    return text

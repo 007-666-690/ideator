@@ -90,7 +90,11 @@ def test_fix_finding_with_ai_reopens_regenerates_and_reviews_again(client, fake_
     original = fake_llm.complete
     seen = []
 
+    prompts_seen = []
+
     def with_finding(**kw):
+        if kw.get("task") == "consistency_review":
+            prompts_seen.append(kw.get("user", ""))
         if kw.get("task") == "consistency_review" and not seen:
             seen.append(1)
             return ConsistencyReview(
@@ -138,3 +142,7 @@ def test_fix_finding_with_ai_reopens_regenerates_and_reviews_again(client, fake_
         assert time.time() < end
         time.sleep(0.1)
     assert not [f for f in review["content"]["findings"] if "EP-12 no define" in f["description"]], review["content"]["findings"]
+    # La 2ª revisión recuerda lo ya corregido y solo acepta problemas graves nuevos.
+    assert "REVISIÓN N° 2" in prompts_seen[-1] and "EP-12 no define" in prompts_seen[-1]
+    assert review["content"]["round"] == 2
+    assert all(f["severity"] != "menor" for f in review["content"]["findings"] if f["source"] == "ia")
