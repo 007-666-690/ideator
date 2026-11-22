@@ -86,8 +86,8 @@ def test_session_explained_and_logout_revokes_copied_token(client):
     assert r.status_code == 200
     data = r.json()
     assert data["storage"]["cookie_name"] == "ideator_session" and data["storage"]["http_only"] is True
-    assert data["claims"]["name"] == "Cristiano Hola" and data["claims"]["sub"] == data["user"]["id"]
-    assert [f["claim"] for f in data["fields"]] == ["iss", "aud", "sub", "name", "email", "iat", "exp", "jti", "type"]
+    assert data["claims"]["sub"] == data["user"]["id"] and "email" not in data["claims"] and "name" not in data["claims"]
+    assert [f["claim"] for f in data["fields"]] == ["iss", "aud", "sub", "iat", "exp", "jti", "type"]
     assert token not in r.text  # el token mismo nunca se devuelve (la cookie es HttpOnly)
 
     # Alguien copia el token desde DevTools; después el usuario cierra sesión

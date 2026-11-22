@@ -1,5 +1,5 @@
 export type Role = "owner" | "editor" | "viewer";
-export type StageKind = "product" | "data_model" | "api" | "frontend" | "architecture" | "review";
+export type StageKind = "product" | "data_model" | "api" | "frontend" | "architecture" | "testing" | "review";
 export type StageStatus = "locked" | "in_progress" | "approved" | "stale";
 
 export interface UserRef {
@@ -364,6 +364,8 @@ export interface StageView {
   junctions?: { table: string; left: string; right: string }[];
   // pantallas
   navigation_map?: string;
+  coverage?: Record<string, string[]>;
+  seed_sql?: string;
   // arquitectura
   scenarios?: Scenario[];
   // revisión

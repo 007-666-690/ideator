@@ -40,7 +40,7 @@ def _note_error(db, stage, message: str) -> None:
 def _step(db, llm, project: Project, user: User) -> bool:
     """Ejecuta el siguiente paso pendiente. Devuelve True si hizo algo (hay que seguir)."""
     stages = engine.stages_by_kind(db, project.id)
-    for kind in ("data_model", "api", "frontend", "architecture", "review"):
+    for kind in ("data_model", "api", "frontend", "architecture", "testing", "review"):
         stage = stages[kind]
         if stage.status == STAGE_APPROVED:
             continue
@@ -59,6 +59,10 @@ def _step(db, llm, project: Project, user: User) -> bool:
                 if not stage.content.get("data"):
                     db.refresh(stage)
                     engine.architecture_generate(db, llm, project, user, stage.version, None)
+                return False
+            if kind == "testing":
+                if not stage.content.get("data"):
+                    engine.generate_testing(db, project, user, stage.version)
                 return False
             if not stage.content.get("ran_at"):
                 engine.run_review(db, llm, project, user, stage.version)

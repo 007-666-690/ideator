@@ -58,6 +58,7 @@ from .schemas import (
     ProductTurn,
     empty_brief,
 )
+from .testing import TestingSpec, build_testing, validate_testing
 from .validation import (
     derive_relationships,
     has_errors,
@@ -92,7 +93,7 @@ GENERATION_TASKS: dict[str, tuple[str, type[BaseModel], str]] = {
     "api": ("api_spec", ApiSpec, prompts.API_SYSTEM),
     "frontend": ("frontend_spec", FrontendSpec, prompts.FRONTEND_SYSTEM),
 }
-AREA_BY_KIND = {"product": "producto", "data_model": "datos", "api": "api", "frontend": "pantallas", "architecture": "arquitectura"}
+AREA_BY_KIND = {"product": "producto", "data_model": "datos", "api": "api", "frontend": "pantallas", "architecture": "arquitectura", "testing": "pruebas"}
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +141,32 @@ def create_stages(db: Session, project: Project) -> None:
                 version=1,
             )
         )
+
+
+def ensure_stages(db: Session) -> int:
+    """Agrega a proyectos antiguos las etapas nuevas (por ejemplo «Pruebas y datos»).
+
+    Si la etapa anterior ya está aprobada, la nueva queda en curso para generarla; las etapas que
+    vienen después y estaban aprobadas pasan a «por revisar», porque ahora dependen de ella.
+    """
+    added = 0
+    for project in db.scalars(select(Project)).all():
+        have = {s.kind: s for s in db.scalars(select(Stage).where(Stage.project_id == project.id)).all()}
+        for i, kind in enumerate(STAGE_KINDS):
+            if kind in have:
+                continue
+            prev = have.get(STAGE_KINDS[i - 1]) if i else None
+            status = STAGE_IN_PROGRESS if prev is not None and prev.status == STAGE_APPROVED else STAGE_LOCKED
+            stage = Stage(project_id=project.id, kind=kind, status=status, content=initial_content(kind, project.name), version=1)
+            db.add(stage)
+            have[kind] = stage
+            for later in STAGE_KINDS[i + 1 :]:
+                if later in have and have[later].status == STAGE_APPROVED:
+                    have[later].status = STAGE_STALE
+            added += 1
+    if added:
+        db.commit()
+    return added
 
 
 def stages_by_kind(db: Session, project_id: uuid.UUID) -> dict[str, Stage]:
@@ -334,6 +361,16 @@ def stage_issues(db: Session, project: Project, stages: dict[str, Stage], kind: 
         if spec.scenario_id != stage.content.get("selected"):
             issues.append(issue("error", "arch.mismatch", "La arquitectura detallada no corresponde al escenario seleccionado. Vuelve a generarla."))
         return issues, extra
+
+    if kind == "testing":
+        spec = data_of(stage, TestingSpec)
+        if spec is None:
+            return [issue("error", "test.missing", "Aún no se arma el plan de pruebas y los datos de ejemplo.")], extra
+        from .testing import coverage, seed_sql
+
+        extra["coverage"] = coverage(brief, spec.cases)
+        extra["seed_sql"] = seed_sql(spec.seed)
+        return validate_testing(spec, brief, data_of(stages["data_model"], DataModel)), extra
 
     # review
     issues = []
@@ -736,7 +773,7 @@ def generate_stage(db: Session, llm: LLMClient, project: Project, user: User, ki
 
 
 def save_stage_data(db: Session, project: Project, user: User, kind: str, data: dict[str, Any], version: int, summary: str | None) -> None:
-    schema = STAGE_SCHEMAS.get(kind)
+    schema = TestingSpec if kind == "testing" else STAGE_SCHEMAS.get(kind)
     if schema is None or kind == "product":
         raise ApiError(404, "stage_not_found", "Esta etapa no admite edición de datos.")
     stage = get_stage(db, project.id, kind)
@@ -752,6 +789,23 @@ def save_stage_data(db: Session, project: Project, user: User, kind: str, data: 
         raise ApiError(422, "invalid_scenario", "Escenario de arquitectura desconocido.")
     commit_revision(db, stage, content, user, "user", (summary or "Edición manual").strip())
     log_activity(db, project.id, user, "stage.edited", {"kind": kind, "summary": summary})
+    db.commit()
+
+
+def generate_testing(db: Session, project: Project, user: User, version: int) -> None:
+    """Arma el plan de pruebas y los datos sintéticos desde lo aprobado (sin IA: instantáneo y trazable)."""
+    stages = stages_by_kind(db, project.id)
+    stage = stages["testing"]
+    check_version(stage, version)
+    require_editable(stage)
+    require_upstream_approved(stages, "testing")
+    up = _upstream_artifacts(stages)
+    if not (up["model"] and up["api"]):
+        raise ApiError(409, "not_ready", "Faltan el modelo de datos o la API aprobados.")
+    spec = build_testing(up["brief"], up["model"], up["api"], up["frontend"])
+    content = {"data": spec.model_dump(mode="json"), "based_on": {u: stages[u].approved_version for u in UPSTREAM["testing"]}}
+    commit_revision(db, stage, content, user, "system", "Plan de pruebas y datos sintéticos generados desde lo aprobado")
+    log_activity(db, project.id, user, "stage.generated", {"kind": "testing", "instructions": None})
     db.commit()
 
 
@@ -1126,7 +1180,14 @@ def generate_documents(db: Session, project: Project, user: User) -> list[Docume
     now = utcnow()
     source_versions = {k: stages[k].version for k in STAGE_KINDS}
     product_md = product_spec_markdown(
-        project_name=project.name, brief=up["brief"], model=up["model"], api=up["api"], fe=up["frontend"], version=version, generated_at=now
+        project_name=project.name,
+        brief=up["brief"],
+        model=up["model"],
+        api=up["api"],
+        fe=up["frontend"],
+        version=version,
+        generated_at=now,
+        testing=data_of(stages["testing"], TestingSpec),
     )
     arch_md = architecture_markdown(
         project_name=project.name,

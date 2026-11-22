@@ -27,13 +27,14 @@ ROLES = ("owner", "editor", "viewer")
 ROLE_RANK = {"viewer": 1, "editor": 2, "owner": 3}
 
 # Orden del proceso de definición
-STAGE_KINDS = ("product", "data_model", "api", "frontend", "architecture", "review")
+STAGE_KINDS = ("product", "data_model", "api", "frontend", "architecture", "testing", "review")
 STAGE_LABELS = {
     "product": "Definición del producto",
     "data_model": "Modelo de datos",
     "api": "Backend y API",
     "frontend": "Pantallas y navegación",
     "architecture": "Arquitectura",
+    "testing": "Pruebas y datos",
     "review": "Revisión final",
 }
 # Estados de una etapa

@@ -204,6 +204,7 @@ REGLAS
 - "states": qué se muestra cuando no hay datos, mientras carga y si hay error (incluye sin permisos y no encontrado cuando aplique).
 - "navigation": todas las transiciones entre pantallas (incluye volver y el menú principal), con el disparador.
 - "layout": estructura global (cabecera, menú, qué opciones ve cada rol).
+- "design_guidelines": lineamientos concretos basados en Material Design 3 de Google (https://m3.material.io/): iconos Material Symbols, objetivos táctiles de al menos 48 dp, espaciado en múltiplos de 4/8 dp, escala tipográfica de M3, componentes estándar (botones, campos de texto, tarjetas, barra de navegación, diálogos), estados vacío/carga/error y contraste WCAG AA. Adapta color, tono e iconografía al sector, la marca y la audiencia de ESTE producto; no un estilo genérico.
 - SUPUESTOS: los "assumptions" de la definición son valores por defecto vigentes, estén o no marcados accepted. Aplícalos tal cual (límites de largo, paginación, orden, normalización de textos, idioma). Nunca escribas que un supuesto "no fue aceptado" ni diseñes en contra de uno; si un supuesto choca con un requisito, manda el requisito y explícalo en las notas."""
 
 

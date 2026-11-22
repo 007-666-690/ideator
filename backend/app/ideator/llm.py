@@ -197,15 +197,15 @@ class AzureOpenAIClient(LLMClient):
             outcome = "ok"
             return result
         except openai.APITimeoutError as exc:
-            raise LLMUnavailable("El modelo de IA tardó demasiado en responder. Intenta de nuevo.") from exc
+            raise LLMUnavailable("La IA tardó demasiado en responder (tiempo agotado). Lo que ya tenías sigue guardado: reintenta.") from exc
         except openai.APIConnectionError as exc:
-            raise LLMUnavailable("No se pudo conectar con el modelo de IA.") from exc
+            raise LLMUnavailable("No hay conexión con el proveedor de IA (red o servicio caído). Lo que ya tenías sigue guardado: reintenta.") from exc
         except openai.RateLimitError as exc:
-            raise LLMUnavailable("El modelo de IA está saturado (límite de uso). Espera un momento.") from exc
+            raise LLMUnavailable("Se alcanzó el límite de uso de la IA (429): demasiadas consultas por minuto o se acabaron los créditos. Espera un momento y reintenta.") from exc
         except openai.AuthenticationError as exc:
-            raise LLMUnavailable("Las credenciales del modelo de IA no son válidas.") from exc
+            raise LLMUnavailable("Las credenciales del modelo de IA no son válidas (clave de API incorrecta o revocada). Revisa backend/.env.") from exc
         except openai.APIStatusError as exc:
-            raise LLMUnavailable(f"El modelo de IA respondió con error {exc.status_code}.") from exc
+            raise LLMUnavailable(f"El proveedor de IA respondió con error {exc.status_code}" + (" (servicio saturado o caído)" if exc.status_code >= 500 else "") + ". Lo que ya tenías sigue guardado: reintenta.") from exc
         finally:
             elapsed = time.perf_counter() - start
             LLM_REQUESTS.labels(task, outcome).inc()

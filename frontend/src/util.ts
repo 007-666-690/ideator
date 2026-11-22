@@ -1,6 +1,6 @@
 import type { Role, StageKind, StageStatus } from "./types";
 
-export const STAGE_ORDER: StageKind[] = ["product", "data_model", "api", "frontend", "architecture", "review"];
+export const STAGE_ORDER: StageKind[] = ["product", "data_model", "api", "frontend", "architecture", "testing", "review"];
 
 export const STAGE_NAMES: Record<StageKind | "documents", string> = {
   product: "Definición del producto",
@@ -8,6 +8,7 @@ export const STAGE_NAMES: Record<StageKind | "documents", string> = {
   api: "Backend y API",
   frontend: "Pantallas y navegación",
   architecture: "Arquitectura",
+  testing: "Pruebas y datos",
   review: "Revisión final",
   documents: "Documentos",
 };

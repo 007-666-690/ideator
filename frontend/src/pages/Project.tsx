@@ -14,6 +14,7 @@ import DataModelStage from "./stages/DataModelStage";
 import DocumentsStage from "./stages/DocumentsStage";
 import FrontendStage from "./stages/FrontendStage";
 import ProductStage from "./stages/ProductStage";
+import TestingStage from "./stages/TestingStage";
 import ReviewStage from "./stages/ReviewStage";
 
 export interface StageCtx {
@@ -34,6 +35,7 @@ const STAGES: Record<StageKind, (ctx: StageCtx) => JSX.Element> = {
   api: (ctx) => <ApiStage ctx={ctx} />,
   frontend: (ctx) => <FrontendStage ctx={ctx} />,
   architecture: (ctx) => <ArchitectureStage ctx={ctx} />,
+  testing: (ctx) => <TestingStage ctx={ctx} />,
   review: (ctx) => <ReviewStage ctx={ctx} />,
 };
 
@@ -233,7 +235,7 @@ export default function ProjectPage() {
             })}
             <li className={`${reviewApproved ? "in_progress" : "locked"} ${current === "documents" ? "active" : ""}`}>
               <span className="node" aria-hidden="true">
-                7
+                {STAGE_ORDER.length + 1}
               </span>
               <button onClick={() => navigate(`/p/${project.id}/documents`)}>
                 Documentos

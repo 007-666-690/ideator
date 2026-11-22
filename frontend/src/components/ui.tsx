@@ -232,7 +232,65 @@ export function Mermaid({ code }: { code: string }) {
         <pre>{code}</pre>
       </div>
     );
-  return <div className="diagram" aria-label="Diagrama" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <ZoomBox svg={svg} />;
+}
+
+/** Diagrama con zoom: botones, rueda del mouse (con Ctrl), arrastrar para mover y pantalla completa. */
+function ZoomBox({ svg }: { svg: string }) {
+  const [scale, setScale] = useState(1);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [full, setFull] = useState(false);
+  const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const clamp = (v: number) => Math.min(4, Math.max(0.3, v));
+  const reset = () => {
+    setScale(1);
+    setPos({ x: 0, y: 0 });
+  };
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
+  return (
+    <div className={`diagram zoomable ${full ? "full" : ""}`} role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label="Diagrama">
+      <div className="zoom-bar" role="toolbar" aria-label="Zoom del diagrama">
+        <button type="button" onClick={() => setScale((s) => clamp(s * 1.25))} aria-label="Acercar">
+          +
+        </button>
+        <button type="button" onClick={() => setScale((s) => clamp(s / 1.25))} aria-label="Alejar">
+          −
+        </button>
+        <button type="button" onClick={reset}>
+          Ajustar
+        </button>
+        <button type="button" onClick={() => setFull((f) => !f)}>
+          {full ? "Cerrar" : "Pantalla completa"}
+        </button>
+        <span className="small muted">{Math.round(scale * 100)} %</span>
+      </div>
+      <div
+        className="zoom-view"
+        onWheel={(e) => {
+          if (!e.ctrlKey && !full) return;
+          e.preventDefault();
+          setScale((s) => clamp(s * (e.deltaY < 0 ? 1.1 : 0.9)));
+        }}
+        onPointerDown={(e) => {
+          drag.current = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y };
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (d) setPos({ x: d.px + e.clientX - d.x, y: d.py + e.clientY - d.y });
+        }}
+        onPointerUp={() => (drag.current = null)}
+        onDoubleClick={reset}
+      >
+        <div className="zoom-content" style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})` }} dangerouslySetInnerHTML={{ __html: svg }} />
+      </div>
+    </div>
+  );
 }
 
 export function Markdown({ text }: { text: string }) {

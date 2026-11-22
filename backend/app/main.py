@@ -31,6 +31,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(settings.log_level)
     engine = init_engine(settings.database_url)
     Base.metadata.create_all(engine)
+    from .db import SessionLocal
+    from .ideator.engine import ensure_stages
+
+    with SessionLocal() as db:  # proyectos creados antes de agregar una etapa nueva
+        added = ensure_stages(db)
+        if added:
+            logger.info("Etapas nuevas agregadas a proyectos existentes", extra={"added": added})
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

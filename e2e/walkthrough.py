@@ -75,12 +75,21 @@ with sync_playwright() as p:
             shot(page, "08-pantallas")
             page.get_by_role("tab", name="Mapa de navegación").click()
             page.wait_for_selector(".diagram svg", timeout=15000)
+            page.get_by_role("button", name="Acercar").click()
             shot(page, "09-mapa")
         approve(page)
 
     page.wait_for_url("**/architecture", timeout=15000)
     expect(page.get_by_text("Por qué esta arquitectura")).to_be_visible(timeout=30000)  # evaluó, eligió y detalló sola
     shot(page, "10-arquitectura")
+    approve(page)
+
+    page.wait_for_url("**/testing", timeout=15000)
+    expect(page.get_by_role("tab", name="Casos de prueba", exact=False)).to_be_visible(timeout=15000)
+    page.locator(".test-case summary").first.click()
+    shot(page, "10b-pruebas")
+    page.get_by_role("tab", name="Datos ficticios").click()
+    shot(page, "10c-datos")
     approve(page)
 
     page.wait_for_url("**/review", timeout=15000)

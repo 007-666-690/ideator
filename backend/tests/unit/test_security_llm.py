@@ -31,7 +31,9 @@ def test_jwt_roundtrip_and_errors():
     # Campos estándar más dos legibles; el token se lee sin la clave, pero no se puede cambiar
     raw = jwt.decode(token, options={"verify_signature": False})
     assert raw["iss"] == "ideator" and raw["aud"] == "ideator-web" and raw["type"] == "access"
-    assert raw["sub"] == str(user.id) and raw["name"] == "Cristiano Hola" and raw["email"] == "cristiano@example.com"
+    assert raw["sub"] == str(user.id)
+    # Minimización: el token se puede leer en jwt.io, así que no lleva datos personales
+    assert "email" not in raw and "name" not in raw and "cristiano" not in str(raw)
     assert raw["exp"] - raw["iat"] == SETTINGS.access_token_minutes * 60
     assert uuid.UUID(raw["jti"]) and raw["jti"] != decode_access_token(create_access_token(user, SETTINGS), SETTINGS).jti
     with pytest.raises(ApiError) as exc:

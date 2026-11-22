@@ -626,3 +626,31 @@ p.mk-meta { margin: 0; }
 .composer { display: flex; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--rule); flex-wrap: wrap; }
 .composer input { flex: 1; min-width: 200px; }
 .brief-details > summary { cursor: pointer; padding: 6px 0; color: var(--cobalt); }
+
+/* --- Diagramas con zoom ---------------------------------------------------------------- */
+.diagram.zoomable { padding: 0; overflow: hidden; position: relative; }
+.zoom-bar { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--rule); background: var(--surface); }
+.zoom-bar button { all: unset; cursor: pointer; min-width: 30px; text-align: center; padding: 4px 10px; border: 1px solid var(--rule); border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--ink); background: #fff; }
+.zoom-bar button:hover { border-color: var(--cobalt); }
+.zoom-bar button:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
+.zoom-view { overflow: hidden; cursor: grab; min-height: 260px; max-height: 70vh; touch-action: none; }
+.zoom-view:active { cursor: grabbing; }
+.zoom-content { transform-origin: top center; transition: transform .08s linear; padding: 16px; }
+.zoom-content svg { max-width: 100%; height: auto; }
+.diagram.zoomable.full { position: fixed; inset: 16px; z-index: 50; background: #fff; box-shadow: 0 20px 60px rgba(0,0,0,.35); display: flex; flex-direction: column; border-radius: var(--radius-m); }
+.diagram.zoomable.full .zoom-view { flex: 1; max-height: none; }
+@media (prefers-reduced-motion: reduce) { .zoom-content { transition: none; } }
+
+/* --- Pruebas y datos -------------------------------------------------------------------- */
+.test-case { background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--rule); border-radius: var(--radius-s); margin-bottom: 8px; padding: 0 14px; }
+.test-case > summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 0; }
+.test-case[open] > summary { border-bottom: 1px solid var(--rule); margin-bottom: 10px; }
+.test-case .kv { padding-bottom: 12px; }
+.test-case.k-positivo { border-left-color: #2e9e6a; }
+.test-case.k-negativo { border-left-color: #c0392b; }
+.test-case.k-limite { border-left-color: #d48a00; }
+.test-case.k-seguridad { border-left-color: var(--cobalt); }
+.test-case.k-persistencia { border-left-color: #7b5ea7; }
+.tkind { font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--paper); border: 1px solid var(--rule); }
+table.seed td { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+pre.code { background: #0f1630; color: #e8ecf8; padding: 14px; border-radius: var(--radius-s); overflow: auto; max-height: 420px; font-size: 12px; }

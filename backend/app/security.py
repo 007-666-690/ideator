@@ -37,7 +37,7 @@ def verify_password(password_hash: str | None, password: str) -> bool:
 
 # El token de sesión es un JWT FIRMADO (HS256 con SECRET_KEY), no cifrado: cualquiera que lo
 # tenga puede leer su contenido (por ejemplo en jwt.io), pero nadie puede cambiarlo sin que la
-# firma deje de calzar. Por eso solo lleva datos que el mismo usuario ya conoce.
+# firma deje de calzar. Por eso no lleva datos personales: solo ids, fechas y tipo.
 TOKEN_ISSUER = "ideator"  # iss: quién emitió el token (el backend de Ideator)
 TOKEN_AUDIENCE = "ideator-web"  # aud: para quién es (la app web de Ideator)
 TOKEN_TYPE = "access"  # type: token de sesión (no de invitación ni de otro uso)
@@ -49,8 +49,8 @@ def create_access_token(user: User, settings: Settings) -> str:
         "iss": TOKEN_ISSUER,
         "aud": TOKEN_AUDIENCE,
         "sub": str(user.id),  # id del usuario en la tabla users
-        "name": user.name,
-        "email": user.email,
+        # Sin nombre ni correo: un JWT firmado NO está cifrado y cualquiera con el token puede leerlo
+        # (jwt.io). Solo va lo necesario para autenticar; los datos personales se piden a /api/auth/me.
         "iat": int(now.timestamp()),  # emitido (segundos desde 1970, UTC)
         "exp": int((now + timedelta(minutes=settings.access_token_minutes)).timestamp()),  # vence
         "jti": str(uuid.uuid4()),  # id único de esta sesión; al cerrar sesión se revoca

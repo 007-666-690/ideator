@@ -41,6 +41,10 @@ def test_autopilot_chains_generation_after_each_approval(client):
     arch = _wait(client, pid, "architecture", "data")  # evaluó las 5, eligió la recomendada y la detalló
     assert arch["content"]["evaluation"] and arch["content"]["selected"] == arch["content"]["data"]["scenario_id"]
     approve(client, pid, "architecture")
+    testing = _wait(client, pid, "testing", "data")  # plan de pruebas y datos ficticios, sin IA
+    assert testing["content"]["data"]["cases"] and testing["content"]["data"]["seed"]["tables"]
+    assert not [i for i in testing["issues"] if i["severity"] == "error"], testing["issues"]
+    approve(client, pid, "testing")
     review = _wait(client, pid, "review", "ran_at")
     assert review["status"] == "in_progress"  # el piloto nunca aprueba por el equipo
 

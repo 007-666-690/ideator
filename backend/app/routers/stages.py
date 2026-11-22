@@ -191,6 +191,13 @@ def generate(kind: str, body: GenerateIn, access: ProjectAccess = Depends(editor
     return full_stage(db, access, kind)
 
 
+@router.post("/projects/{project_id}/testing/generate")
+def testing_generate(body: VersionIn, access: ProjectAccess = Depends(editor_access), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Arma el plan de pruebas funcionales y los datos sintéticos (sin IA, desde lo aprobado)."""
+    engine.generate_testing(db, access.project, access.user, body.version)
+    return full_stage(db, access, "testing")
+
+
 @router.put("/projects/{project_id}/stages/{kind}")
 def save_stage(kind: str, body: StageDataIn, access: ProjectAccess = Depends(editor_access), db: Session = Depends(get_db)) -> dict[str, Any]:
     engine.save_stage_data(db, access.project, access.user, kind, body.data, body.version, body.summary)

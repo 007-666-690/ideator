@@ -75,6 +75,20 @@ def test_full_flow_generates_documents(client):
     assert arch["content"]["data"]["scenario_id"] == "A1"
     approve(client, pid, "architecture")
 
+    # Pruebas y datos: plan funcional trazado a requisitos + datos ficticios, sin IA
+    ts = stage(client, pid, "testing")
+    r = client.post(f"/api/projects/{pid}/testing/generate", json={"version": ts["version"]})
+    assert r.status_code == 200, r.text
+    ts = r.json()
+    cases = ts["content"]["data"]["cases"]
+    req_ids = [q["id"] for q in stage(client, pid, "product")["content"]["brief"]["functional_requirements"]]
+    assert all(ts["coverage"][rid] for rid in req_ids)  # cada requisito tiene al menos un caso
+    kinds = {c["kind"] for c in cases}
+    assert {"positivo", "seguridad", "persistencia"} <= kinds and ("negativo" in kinds or "limite" in kinds)
+    assert "-- DATOS FICTICIOS" in ts["seed_sql"] and "INSERT INTO reservations" in ts["seed_sql"]
+    assert "@ejemplo.test" in ts["seed_sql"]
+    approve(client, pid, "testing")
+
     # Revisión: los supuestos ya quedaron aceptados al aprobar la definición
     assert all(a["accepted"] for a in stage(client, pid, "product")["content"]["brief"]["assumptions"])
     rv = stage(client, pid, "review")
@@ -102,7 +116,7 @@ def test_full_flow_generates_documents(client):
     spec = docs["product_spec"]["content"]
     arch_md = docs["architecture"]["content"]
     assert docs["product_spec"]["filename"] == "especificacion-producto.md"
-    for expected in ("## 0. Instrucciones", "RF-03", "RN-02", "CB-06", "```mermaid", "erDiagram", "CREATE TABLE court_blocks", "EP-08 · `POST /api/v1/reservations`", "PA-04", "Supuestos aceptados", "S-01"):
+    for expected in ("## 0. Instrucciones", "RF-03", "RN-02", "CB-06", "```mermaid", "erDiagram", "CREATE TABLE court_blocks", "EP-08 · `POST /api/v1/reservations`", "PA-04", "Supuestos aceptados", "S-01", "## 17. Plan de pruebas funcionales", "PF-01", "## 18. Datos sintéticos", "INSERT INTO"):
         assert expected in spec, expected
     for expected in ("A1 · Monolito modular en Python", "DATABASE_URL", "Single Sign-On", "sequenceDiagram", "401", "403", "Checklist de verificación"):
         assert expected in arch_md, expected
@@ -120,7 +134,7 @@ def test_full_flow_generates_documents(client):
 
     # Historial de versiones con autor y origen
     revisions = client.get(f"/api/projects/{pid}/revisions").json()
-    assert {r["source"] for r in revisions} == {"ai", "user"}
+    assert {r["source"] for r in revisions} == {"ai", "user", "system"}
     project = client.get(f"/api/projects/{pid}").json()
     assert project["current_stage"] == "documents"
     assert project["documents"] == 2

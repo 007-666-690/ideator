@@ -100,8 +100,12 @@ def product_spec_markdown(
     version: int,
     generated_at: datetime,
     stage_only: bool = False,
+    testing: Any = None,
 ) -> str:
-    """Especificación del producto. Con stage_only=True genera solo lo de la etapa 1 (sin §9–11)."""
+    """Especificación del producto. Con stage_only=True genera solo lo de la etapa 1 (sin §9–11).
+
+    testing (TestingSpec) agrega §17 Plan de pruebas funcionales y §18 Datos sintéticos.
+    """
     names = _user_names(brief)
     req_eps, req_screens = _req_links(api, fe) if api is not None and fe is not None else ({}, {})
     step_screens: dict[int, list[str]] = {}
@@ -139,6 +143,13 @@ def product_spec_markdown(
                 "El stack, la estructura del repositorio, la autenticación/SSO, las variables de entorno y el despliegue están en `arquitectura.md`.",
                 "El MVP está terminado cuando se cumplen todos los criterios de aceptación (§5) y los comportamientos de los casos borde (§8).",
                 "Orden sugerido: base de datos y migraciones (§9) → autenticación → endpoints en el orden del recorrido principal (§6) → pantallas (§11) → casos borde → pruebas.",
+                *(
+                    [
+                        "Las pruebas automáticas deben cubrir cada caso de §17 (mismo id PF-xx en el nombre del test). Carga los datos ficticios de §18 solo en desarrollo y pruebas."
+                    ]
+                    if testing is not None
+                    else []
+                ),
             ]
         )
     )
@@ -271,6 +282,10 @@ def product_spec_markdown(
     w("")
     w(_table(["Término", "Definición"], [[g.term, g.definition] for g in brief.glossary]))
     w("")
+    if testing is not None and not stage_only:
+        from .testing import testing_markdown
+
+        out.extend(testing_markdown(testing, brief))
     return "\n".join(out)
 
 
@@ -447,6 +462,11 @@ def _frontend_section(fe: FrontendSpec, names: dict[str, str]) -> list[str]:
     w(f"- **Pantalla inicial:** {fe.start_screen} ({screens.get(fe.start_screen, '?')})")
     if fe.design_guidelines:
         w("- **Lineamientos:** " + "; ".join(fe.design_guidelines))
+    w(
+        "- **Guía de diseño base:** [Material Design 3](https://m3.material.io/) de Google: "
+        "[iconos Material Symbols](https://fonts.google.com/icons), objetivos táctiles de 48 dp, espaciado en múltiplos de 4/8 dp, "
+        "componentes estándar y [accesibilidad](https://m3.material.io/foundations/designing/overview) (contraste WCAG AA, foco visible, etiquetas)."
+    )
     w("")
     w("### Mapa de navegación")
     w("")

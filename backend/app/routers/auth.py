@@ -135,8 +135,6 @@ CLAIM_INFO = [
     ("iss", "Emisor", "Quién creó el token: el backend de Ideator. El backend rechaza tokens de otro emisor."),
     ("aud", "Audiencia", "Para quién es el token: la app web de Ideator. Un token hecho para otra app no sirve aquí."),
     ("sub", "Usuario (sujeto)", "El id del usuario en la tabla users. Con este id el backend sabe quién hace cada llamada."),
-    ("name", "Nombre", "El nombre del usuario, solo para que el token se lea fácil. Los permisos no dependen de esto."),
-    ("email", "Correo", "El correo del usuario, también solo para leerlo. El correo real se consulta en la base de datos."),
     ("iat", "Emitido", "Cuándo se creó el token, en segundos desde el 1 de enero de 1970 (UTC)."),
     ("exp", "Vence", "Cuándo deja de servir el token, en el mismo formato. Después de esa hora el backend responde 401."),
     ("jti", "Id de la sesión", "Un id único y aleatorio de este token. Al cerrar sesión se guarda en la tabla revoked_tokens y el token deja de servir."),

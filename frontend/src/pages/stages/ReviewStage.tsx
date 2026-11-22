@@ -1,9 +1,20 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../api";
 import type { Finding, Issue } from "../../types";
 import { timeAgo } from "../../util";
 import type { StageCtx } from "../Project";
 import { StageIntro } from "./common";
+
+// Área del hallazgo → etapa donde se corrige (para el botón «Ir a corregir»).
+const AREA_STAGE: Record<string, string> = {
+  producto: "product",
+  datos: "data_model",
+  api: "api",
+  pantallas: "frontend",
+  arquitectura: "architecture",
+  pruebas: "testing",
+};
 
 const SEV: Record<Finding["severity"], string> = { critica: "Crítica", importante: "Importante", menor: "Menor" };
 const STATUS: Record<Finding["status"], string> = { open: "Abierto", resolved: "Corregido", accepted: "Aceptado sin cambios" };
@@ -13,6 +24,8 @@ function FindingCard({ f, ctx }: { f: Finding; ctx: StageCtx }) {
   const [note, setNote] = useState("");
   const [asking, setAsking] = useState(false);
   const canWork = editable && view.status !== "approved" && view.status !== "locked";
+  const navigate = useNavigate();
+  const target = AREA_STAGE[f.area?.toLowerCase()] ?? Object.entries(AREA_STAGE).find(([k]) => f.area?.toLowerCase().includes(k))?.[1];
   return (
     <div className={`finding ${f.severity} ${f.status !== "open" ? "closed" : ""}`}>
       <div className="row between">
@@ -28,6 +41,11 @@ function FindingCard({ f, ctx }: { f: Finding; ctx: StageCtx }) {
       <p className="small muted" style={{ marginBottom: 6 }}>
         Sugerencia: {f.suggestion}
       </p>
+      {target && f.status === "open" && (
+        <button className="btn secondary small" style={{ marginBottom: 6 }} onClick={() => navigate(`/p/${project.id}/${target}`)}>
+          Ir a corregir →
+        </button>
+      )}
       {f.note && (
         <p className="small">
           Nota de {f.resolved_by}: {f.note}
