@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     login_window_seconds: int = 300
 
     @property
+    def vertex_key_path(self):
+        """Archivo de la cuenta de servicio. Acepta también «.json.json» (Windows oculta la extensión al renombrar)."""
+        from pathlib import Path
+
+        for candidate in (self.vertex_credentials_file, self.vertex_credentials_file + ".json"):
+            if Path(candidate).is_file():
+                return Path(candidate)
+        return None
+
+    @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
@@ -101,9 +111,7 @@ class Settings(BaseSettings):
         if self.llm_provider == "gemini":
             return bool(self.gemini_api_key)
         if self.llm_provider == "vertex":
-            from pathlib import Path
-
-            return Path(self.vertex_credentials_file).is_file()
+            return self.vertex_key_path is not None
         return bool(self.azure_openai_endpoint and self.azure_openai_api_key)
 
 

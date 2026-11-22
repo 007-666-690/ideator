@@ -51,3 +51,11 @@ def test_vertex_builds_endpoint_and_token(key_file, monkeypatch):
 def test_vertex_missing_file_is_clear(tmp_path):
     with pytest.raises(llm.LLMUnavailable, match="cuenta de servicio"):
         llm.VertexClient(Settings(llm_provider="vertex", vertex_credentials_file=str(tmp_path / "no.json")))
+
+
+def test_vertex_accepts_double_extension(key_file, tmp_path):
+    path, _ = key_file
+    doubled = tmp_path / "vertex-key.json.json"
+    path.rename(doubled)
+    client = llm.VertexClient(Settings(llm_provider="vertex", vertex_credentials_file=str(tmp_path / "vertex-key.json")))
+    assert client.model.startswith("google/")

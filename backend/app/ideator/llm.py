@@ -247,10 +247,9 @@ class VertexClient(AzureOpenAIClient):
 
     def __init__(self, settings: Settings) -> None:
         import threading
-        from pathlib import Path
 
-        path = Path(settings.vertex_credentials_file)
-        if not path.is_file():
+        path = settings.vertex_key_path
+        if path is None:
             raise LLMUnavailable(
                 f"Falta el archivo de la cuenta de servicio de Vertex AI ({settings.vertex_credentials_file}). "
                 "Descárgalo desde Google Cloud y guárdalo en la carpeta backend."
