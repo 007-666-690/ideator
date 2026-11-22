@@ -63,6 +63,11 @@ class DismissIn(BaseModel):
     reason: str = Field(default="", max_length=500)
 
 
+class FixIn(BaseModel):
+    version: int
+    finding_ids: list[str] = Field(min_length=1, max_length=50)
+
+
 class FindingIn(BaseModel):
     version: int
     resolution: Literal["fixed", "accepted", "open"]
@@ -273,6 +278,14 @@ def reopen(kind: str, body: VersionIn, access: ProjectAccess = Depends(editor_ac
 def review_run(body: VersionIn, access: ProjectAccess = Depends(editor_access), db: Session = Depends(get_db), llm: LLMClient = Depends(llm_dep)) -> dict[str, Any]:
     engine.run_review(db, llm, access.project, access.user, body.version)
     return full_stage(db, access, "review")
+
+
+@router.post("/projects/{project_id}/review/fix")
+def review_fix(body: FixIn, access: ProjectAccess = Depends(editor_access), db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Corregir con IA: reabre las etapas de los hallazgos y el piloto automático las rehace."""
+    target = engine.fix_findings(db, access.project, access.user, body.finding_ids, body.version)
+    autopilot.kick(access.project.id, access.user.id, settings)
+    return {"stage": target}
 
 
 @router.post("/projects/{project_id}/review/findings/{finding_id}")

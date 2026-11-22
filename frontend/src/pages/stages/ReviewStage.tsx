@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api";
-import type { Finding, Issue } from "../../types";
+import type { Finding, Issue, StageKind } from "../../types";
 import { timeAgo } from "../../util";
 import type { StageCtx } from "../Project";
 import { StageIntro } from "./common";
@@ -16,6 +16,27 @@ const AREA_STAGE: Record<string, string> = {
   pruebas: "testing",
 };
 
+// Áreas que la IA puede corregir sola (la definición se ajusta conversando en su chat).
+const AI_FIXABLE = new Set(["data_model", "api", "frontend", "architecture"]);
+
+function targetOf(f: Finding): string | undefined {
+  const area = f.area?.toLowerCase() ?? "";
+  return AREA_STAGE[area] ?? Object.entries(AREA_STAGE).find(([k]) => area.includes(k))?.[1];
+}
+
+/** Pide a la IA corregir los hallazgos y lleva al equipo a la etapa que se está corrigiendo. */
+function useFix(ctx: StageCtx) {
+  const navigate = useNavigate();
+  return async (ids: string[]) => {
+    let target: StageKind | null = null;
+    const ok = await ctx.run(async () => {
+      target = (await api.fixFindings(ctx.project.id, ctx.view.version, ids)).stage;
+      return api.stage(ctx.project.id, "review");
+    }, "Plano está corrigiendo. Revisa el cambio y apruébalo.");
+    if (ok && target) navigate(`/p/${ctx.project.id}/${target}`);
+  };
+}
+
 const SEV: Record<Finding["severity"], string> = { critica: "Crítica", importante: "Importante", menor: "Menor" };
 const STATUS: Record<Finding["status"], string> = { open: "Abierto", resolved: "Corregido", accepted: "Aceptado sin cambios" };
 
@@ -25,7 +46,9 @@ function FindingCard({ f, ctx }: { f: Finding; ctx: StageCtx }) {
   const [asking, setAsking] = useState(false);
   const canWork = editable && view.status !== "approved" && view.status !== "locked";
   const navigate = useNavigate();
-  const target = AREA_STAGE[f.area?.toLowerCase()] ?? Object.entries(AREA_STAGE).find(([k]) => f.area?.toLowerCase().includes(k))?.[1];
+  const fix = useFix(ctx);
+  const target = targetOf(f);
+  const aiFix = canWork && f.status === "open" && !!target && AI_FIXABLE.has(target);
   return (
     <div className={`finding ${f.severity} ${f.status !== "open" ? "closed" : ""}`}>
       <div className="row between">
@@ -41,10 +64,19 @@ function FindingCard({ f, ctx }: { f: Finding; ctx: StageCtx }) {
       <p className="small muted" style={{ marginBottom: 6 }}>
         Sugerencia: {f.suggestion}
       </p>
-      {target && f.status === "open" && (
-        <button className="btn secondary small" style={{ marginBottom: 6 }} onClick={() => navigate(`/p/${project.id}/${target}`)}>
-          Ir a corregir →
-        </button>
+      {f.status === "open" && (aiFix || target) && (
+        <div className="row" style={{ marginBottom: 6 }}>
+          {aiFix && (
+            <button className="btn small" disabled={working} onClick={() => fix([f.id])}>
+              Corregir con IA
+            </button>
+          )}
+          {target && (
+            <button className="btn ghost small" onClick={() => navigate(`/p/${project.id}/${target}`)}>
+              Ver la etapa
+            </button>
+          )}
+        </div>
       )}
       {f.note && (
         <p className="small">
@@ -99,6 +131,8 @@ export default function ReviewStage({ ctx }: { ctx: StageCtx }) {
   const warnings: (Issue & { stage: string })[] = content.warnings ?? [];
   const pendingAssumptions = (view.assumptions ?? []).filter((a) => !a.accepted);
   const canWork = editable && view.status !== "approved" && view.status !== "locked";
+  const fix = useFix(ctx);
+  const fixable = findings.filter((f) => f.status === "open" && AI_FIXABLE.has(targetOf(f) ?? ""));
   const outdated = view.issues.some((i) => i.code === "review.outdated" || i.code === "review.not_run");
 
   const acceptAll = async () => {
@@ -154,7 +188,17 @@ export default function ReviewStage({ ctx }: { ctx: StageCtx }) {
 
       {findings.length > 0 && (
         <section className="section">
-          <h3>Hallazgos ({findings.filter((f) => f.status === "open").length} abiertos)</h3>
+          <div className="row between">
+            <h3>Hallazgos ({findings.filter((f) => f.status === "open").length} abiertos)</h3>
+            {canWork && fixable.length > 1 && (
+              <button className="btn" disabled={working} onClick={() => fix(fixable.map((f) => f.id))}>
+                Corregir todos con IA ({fixable.length})
+              </button>
+            )}
+          </div>
+          <p className="small muted">
+            «Corregir con IA» reabre la etapa afectada y Plano la ajusta solo. Tú revisas el cambio y apruebas. Los hallazgos importantes y menores no bloquean: también puedes aprobar la revisión tal como está.
+          </p>
           {(["critica", "importante", "menor"] as const).flatMap((sev) => findings.filter((f) => f.severity === sev)).map((f) => (
             <FindingCard key={f.id} f={f} ctx={ctx} />
           ))}

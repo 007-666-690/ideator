@@ -77,3 +77,64 @@ def test_autopilot_error_is_visible_and_retryable(client, fake_llm, monkeypatch)
     assert client.post(f"/api/projects/{pid}/autopilot").status_code == 200
     dm = _wait(client, pid, "data_model", "data")
     assert "auto_error" not in dm["content"]
+
+
+def test_fix_finding_with_ai_reopens_regenerates_and_reviews_again(client, fake_llm, monkeypatch):
+    from app.ideator.schemas import ConsistencyReview, ReviewFinding
+
+    register(client)
+    pid = create_project(client)["id"]
+    s = stage(client, pid, "product")
+    client.post(f"/api/projects/{pid}/product/start", json={"version": s["version"]})
+    answer_all_open(client, pid)
+    original = fake_llm.complete
+    seen = []
+
+    def with_finding(**kw):
+        if kw.get("task") == "consistency_review" and not seen:
+            seen.append(1)
+            return ConsistencyReview(
+                findings=[ReviewFinding(severity="importante", area="api", description="EP-12 no define el cuerpo.", suggestion="Dejar el cuerpo vacío.")],
+                summary="Un hallazgo.",
+            )
+        if "EP-12 no define" in kw.get("user", "") and kw.get("task") != "consistency_review":
+            seen.append("fix")
+        return original(**kw)
+
+    monkeypatch.setattr(fake_llm, "complete", with_finding)
+    approve(client, pid, "product")
+    for kind, key in (("data_model", "data"), ("api", "data"), ("frontend", "data"), ("architecture", "data"), ("testing", "data")):
+        _wait(client, pid, kind, key)
+        approve(client, pid, kind)
+    review = _wait(client, pid, "review", "ran_at")
+    f = review["content"]["findings"][0]
+    assert f["area"] == "api" and f["status"] == "open"
+
+    r = client.post(f"/api/projects/{pid}/review/fix", json={"version": review["version"], "finding_ids": [f["id"]]})
+    assert r.status_code == 200 and r.json()["stage"] == "api"
+    end = time.time() + 20
+    while "fix" not in seen or stage(client, pid, "api")["generating"]:
+        assert time.time() < end
+        time.sleep(0.1)
+    api_stage = stage(client, pid, "api")
+    assert api_stage["status"] == "in_progress" and "fix_request" not in api_stage["content"]
+    assert stage(client, pid, "frontend")["status"] == "stale"
+    review = stage(client, pid, "review")
+    assert review["content"]["findings"][0]["status"] == "resolved"
+
+    # El equipo aprueba la corrección y lo que quedó por revisar; pruebas y revisión se rehacen solas.
+    for kind in ("api", "frontend", "architecture"):
+        approve(client, pid, kind)
+    end = time.time() + 20
+    while not (stage(client, pid, "testing")["content"]["based_on"]["api"] == stage(client, pid, "api")["approved_version"]):
+        assert time.time() < end
+        time.sleep(0.1)
+    approve(client, pid, "testing")
+    end = time.time() + 20
+    while True:
+        review = stage(client, pid, "review")
+        if not review["generating"] and not [i for i in review["issues"] if i["code"] in ("review.outdated", "review.not_run")]:
+            break
+        assert time.time() < end
+        time.sleep(0.1)
+    assert not [f for f in review["content"]["findings"] if "EP-12 no define" in f["description"]], review["content"]["findings"]

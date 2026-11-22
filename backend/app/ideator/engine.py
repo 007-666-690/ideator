@@ -219,7 +219,8 @@ def require_upstream_approved(stages: dict[str, Stage], kind: str) -> None:
 
 
 def commit_revision(db: Session, stage: Stage, content: dict[str, Any], user: User, source: str, summary: str) -> None:
-    content = {k: v for k, v in content.items() if k != "auto_error"}  # un avance borra el error del piloto
+    # Un avance borra el error del piloto y el pedido de corrección ya atendido.
+    content = {k: v for k, v in content.items() if k not in ("auto_error", "fix_request")}
     stage.content = copy.deepcopy(content)
     stage.version += 1
     stage.updated_by = user.id
@@ -1156,6 +1157,71 @@ def resolve_finding(db: Session, project: Project, user: User, finding_id: str, 
     commit_revision(db, stage, content, user, "user", f"Hallazgo {finding_id}: {finding['status']}")
     log_activity(db, project.id, user, "review.finding", {"id": finding_id, "status": finding["status"]})
     db.commit()
+
+
+KIND_BY_AREA = {v: k for k, v in AREA_BY_KIND.items()}
+FIXABLE_KINDS = ("data_model", "api", "frontend", "architecture")
+
+
+def finding_target(finding: dict) -> str | None:
+    """Etapa que la IA puede corregir para un hallazgo (None si no aplica, p. ej. la definición)."""
+    area = (finding.get("area") or "").lower()
+    kind = finding.get("stage") or KIND_BY_AREA.get(area) or next((k for a, k in KIND_BY_AREA.items() if a in area), None)
+    return kind if kind in FIXABLE_KINDS else None
+
+
+def outdated(stages: dict[str, Stage], kind: str) -> bool:
+    """La etapa se armó con versiones anteriores de las etapas de las que depende."""
+    based_on = stages[kind].content.get("based_on") or {}
+    return any(based_on.get(u) != stages[u].approved_version for u in UPSTREAM[kind])
+
+
+def fix_findings(db: Session, project: Project, user: User, finding_ids: list[str], version: int) -> str:
+    """«Corregir con IA»: reabre las etapas afectadas y deja el pedido para que el piloto las rehaga.
+
+    Devuelve la primera etapa que se corrige (a donde conviene llevar al equipo).
+    """
+    stages = stages_by_kind(db, project.id)
+    review = stages["review"]
+    check_version(review, version)
+    findings = [f for f in review.content.get("findings", []) if f["id"] in finding_ids and f["status"] == "open"]
+    requests: dict[str, list[str]] = {}
+    for f in findings:
+        kind = finding_target(f)
+        if kind:
+            requests.setdefault(kind, []).append(f"[{f['id']}] {f['description']} Corrección pedida: {f['suggestion']}")
+    if not requests:
+        raise ApiError(409, "not_fixable", "Estos hallazgos no se pueden corregir automáticamente: corrígelos en su etapa o acéptalos sin cambios.")
+    first = min(requests, key=STAGE_KINDS.index)
+    for kind in requests:
+        if is_generating(stages[kind]):
+            raise ApiError(409, "generation_in_progress", "La IA está trabajando en el proyecto. Espera a que termine.")
+    if stages[first].status == STAGE_APPROVED:
+        reopen_stage(db, project, user, first, stages[first].version)
+        stages = stages_by_kind(db, project.id)
+    for kind, items in requests.items():
+        stage = stages[kind]
+        if stage.status == STAGE_APPROVED:  # queda después de la primera: pasa a «por revisar»
+            stage.status = STAGE_STALE
+            clear_approvals(db, [stage])
+        instruction = (
+            "Corrige SOLO estos hallazgos de la revisión de consistencia, sin cambiar nada más de la etapa "
+            "(mantén ids, nombres y todo lo que no esté relacionado):\n" + "\n".join(f"- {i}" for i in items)
+        )
+        stage.content = {**copy.deepcopy(stage.content), "fix_request": instruction}
+    review = stages["review"]
+    content = copy.deepcopy(review.content)
+    fixed = []
+    for f in content.get("findings", []):
+        if f["id"] in finding_ids and f["status"] == "open" and finding_target(f):
+            f["status"] = "resolved"
+            f["note"] = f"Corregido con IA en «{STAGE_LABELS[finding_target(f)]}»"
+            f["resolved_by"] = user.name
+            fixed.append(f["id"])
+    commit_revision(db, review, content, user, "user", f"Corrección con IA pedida: {', '.join(fixed)}")
+    log_activity(db, project.id, user, "review.fix_requested", {"findings": fixed, "stages": list(requests)})
+    db.commit()
+    return first
 
 
 # ---------------------------------------------------------------------------

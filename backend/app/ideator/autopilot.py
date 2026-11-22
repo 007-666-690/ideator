@@ -47,6 +47,13 @@ def _step(db, llm, project: Project, user: User) -> bool:
         if stage.status == STAGE_LOCKED or engine.is_generating(stage) or stage.content.get("auto_error"):
             return False
         try:
+            fix = stage.content.get("fix_request")
+            if fix and kind in ("data_model", "api", "frontend"):
+                engine.generate_stage(db, llm, project, user, kind, stage.version, fix)
+                return False  # el equipo revisa la corrección y aprueba
+            if fix and kind == "architecture":
+                engine.architecture_generate(db, llm, project, user, stage.version, fix)
+                return False
             if kind in ("data_model", "api", "frontend"):
                 if stage.content.get("data"):
                     return False
@@ -61,10 +68,11 @@ def _step(db, llm, project: Project, user: User) -> bool:
                     engine.architecture_generate(db, llm, project, user, stage.version, None)
                 return False
             if kind == "testing":
-                if not stage.content.get("data"):
+                # Sin IA e instantáneo: se rehace siempre que cambió algo de lo que depende.
+                if not stage.content.get("data") or engine.outdated(stages, "testing"):
                     engine.generate_testing(db, project, user, stage.version)
                 return False
-            if not stage.content.get("ran_at"):
+            if not stage.content.get("ran_at") or engine.review_outdated(stages):
                 engine.run_review(db, llm, project, user, stage.version)
             return False
         except (ApiError, LLMError) as exc:

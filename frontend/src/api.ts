@@ -131,6 +131,8 @@ export const api = {
   selectArchitecture: (id: string, version: number, scenarioId: string) =>
     post<StageView>(`${p(id)}/architecture/select`, { version, scenario_id: scenarioId }),
   runReview: (id: string, version: number) => post<StageView>(`${p(id)}/review/run`, { version }),
+  fixFindings: (id: string, version: number, findingIds: string[]) =>
+    post<{ stage: StageKind }>(`${p(id)}/review/fix`, { version, finding_ids: findingIds }),
   resolveFinding: (id: string, findingId: string, version: number, resolution: "fixed" | "accepted" | "open", note: string) =>
     post<StageView>(`${p(id)}/review/findings/${findingId}`, { version, resolution, note }),
 
