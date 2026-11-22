@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
 
     # IA
-    llm_provider: str = "fake"  # azure | gemini | fake
+    llm_provider: str = "fake"  # azure | gemini | vertex | fake
     # Piloto automático: al aprobar una etapa, la IA genera sola la siguiente (y corrige sus errores).
     autopilot: bool = True
     azure_openai_endpoint: str = ""  # https://<recurso>.openai.azure.com/openai/v1
@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # Si el modelo principal está saturado (503/429/500), se reintenta con este. Vacío = sin respaldo.
     gemini_fallback_model: str = "gemini-3.6-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    # Vertex AI (Gemini cobrado a la cuenta de Google Cloud: usa los créditos de educación).
+    # Archivo JSON de la cuenta de servicio, relativo a la carpeta backend. Nunca se sube a GitHub.
+    vertex_credentials_file: str = "vertex-key.json"
+    vertex_project: str = ""  # vacío = se toma del archivo JSON
+    vertex_location: str = "global"
     llm_reasoning_effort: str = "low"  # minimal | low | medium | high
     llm_timeout_seconds: int = 300
     llm_max_output_tokens: int = 32000
@@ -95,6 +100,10 @@ class Settings(BaseSettings):
             return True
         if self.llm_provider == "gemini":
             return bool(self.gemini_api_key)
+        if self.llm_provider == "vertex":
+            from pathlib import Path
+
+            return Path(self.vertex_credentials_file).is_file()
         return bool(self.azure_openai_endpoint and self.azure_openai_api_key)
 
 
@@ -124,7 +133,7 @@ def validate_settings(settings: Settings) -> None:
         if settings.secret_key == DEFAULT_SECRET or len(settings.secret_key) < 32:
             raise RuntimeError("SECRET_KEY debe definirse (mínimo 32 caracteres) en producción")
         if settings.llm_provider == "fake":
-            raise RuntimeError("En producción LLM_PROVIDER debe ser 'azure' o 'gemini'")
+            raise RuntimeError("En producción LLM_PROVIDER debe ser 'azure', 'gemini' o 'vertex'")
         if not settings.cookie_secure:
             raise RuntimeError("En producción COOKIE_SECURE debe ser true")
 

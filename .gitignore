@@ -9,3 +9,5 @@ frontend/dist/
 e2e-shots/
 .DS_Store
 frontend/tsconfig.tsbuildinfo
+backend/vertex-key.json
+*-key.json

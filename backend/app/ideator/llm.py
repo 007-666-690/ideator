@@ -1,7 +1,9 @@
 """Cliente del modelo de IA.
 
 - AzureOpenAIClient: GPT-5 desplegado en Azure OpenAI (endpoint v1 compatible con OpenAI).
-- GeminiClient: Gemini de Google por su endpoint compatible con OpenAI (créditos de Google Cloud).
+- GeminiClient: Gemini de Google AI Studio por su endpoint compatible con OpenAI (clave de API).
+- VertexClient: Gemini en Vertex AI (Google Cloud), cobrado a la cuenta de facturación del proyecto,
+  así que usa los créditos de educación. Se autentica con una cuenta de servicio (archivo JSON).
 - FakeLLM (en fake.py): respuestas deterministas para pruebas automáticas y modo demo.
 
 Todas las respuestas se piden como salida estructurada (JSON Schema estricto) y se
@@ -232,6 +234,84 @@ class GeminiClient(AzureOpenAIClient):
         self.fallback_model = settings.gemini_fallback_model
 
 
+class VertexClient(AzureOpenAIClient):
+    """Gemini en Vertex AI por su endpoint compatible con OpenAI.
+
+    Vertex no acepta claves de API fijas: con la cuenta de servicio se firma un JWT (RS256) y se
+    cambia por un token de acceso de Google que dura 1 hora; se renueva solo antes de vencer.
+    """
+
+    name = "vertex"
+    TOKEN_URL = "https://oauth2.googleapis.com/token"
+    SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+    def __init__(self, settings: Settings) -> None:
+        import threading
+        from pathlib import Path
+
+        path = Path(settings.vertex_credentials_file)
+        if not path.is_file():
+            raise LLMUnavailable(
+                f"Falta el archivo de la cuenta de servicio de Vertex AI ({settings.vertex_credentials_file}). "
+                "Descárgalo desde Google Cloud y guárdalo en la carpeta backend."
+            )
+        try:
+            info = json.loads(path.read_text(encoding="utf-8"))
+            self._email = info["client_email"]
+            self._private_key = info["private_key"]
+            project = settings.vertex_project or info["project_id"]
+        except (ValueError, KeyError) as exc:
+            raise LLMUnavailable("El archivo de la cuenta de servicio de Vertex AI no es válido (se esperaba el JSON descargado de Google Cloud).") from exc
+        location = settings.vertex_location or "global"
+        host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
+        base_url = f"https://{host}/v1/projects/{project}/locations/{location}/endpoints/openapi"
+        self._lock = threading.Lock()
+        self._token = ""
+        self._expires_at = 0.0
+        self._setup(settings, base_url, "pendiente", self._model_id(settings.gemini_model))
+        self.fallback_model = self._model_id(settings.gemini_fallback_model) if settings.gemini_fallback_model else ""
+
+    @staticmethod
+    def _model_id(model: str) -> str:
+        return model if "/" in model else f"google/{model}"
+
+    def _fetch_token(self) -> tuple[str, float]:
+        import httpx
+        import jwt
+
+        now = int(time.time())
+        assertion = jwt.encode(
+            {"iss": self._email, "scope": self.SCOPE, "aud": self.TOKEN_URL, "iat": now, "exp": now + 3600},
+            self._private_key,
+            algorithm="RS256",
+        )
+        try:
+            response = httpx.post(
+                self.TOKEN_URL,
+                data={"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion},
+                timeout=30,
+            )
+        except httpx.HTTPError as exc:
+            raise LLMUnavailable("No hay conexión con Google para autenticar Vertex AI. Reintenta.") from exc
+        if response.status_code != 200:
+            raise LLMUnavailable(
+                "Google rechazó la cuenta de servicio de Vertex AI (revisa que el archivo JSON sea el actual y que la cuenta tenga el rol «Usuario de Vertex AI»)."
+            )
+        data = response.json()
+        return data["access_token"], time.time() + int(data.get("expires_in", 3600))
+
+    def _ensure_token(self) -> None:
+        with self._lock:
+            if self._token and time.time() < self._expires_at - 300:
+                return
+            self._token, self._expires_at = self._fetch_token()
+            self._client.api_key = self._token
+
+    def _request(self, system: str, user: str, schema: type[BaseModel], effort: str) -> tuple[str, Any]:
+        self._ensure_token()
+        return super()._request(system, user, schema, effort)
+
+
 _client: LLMClient | None = None
 
 
@@ -247,6 +327,8 @@ def get_llm(settings: Settings) -> LLMClient:
         _client = AzureOpenAIClient(settings)
     elif settings.llm_provider == "gemini":
         _client = GeminiClient(settings)
+    elif settings.llm_provider == "vertex":
+        _client = VertexClient(settings)
     else:
         raise LLMUnavailable(f"Proveedor de IA desconocido: {settings.llm_provider}")
     return _client
