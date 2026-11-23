@@ -248,7 +248,16 @@ class VertexClient(AzureOpenAIClient):
     def __init__(self, settings: Settings) -> None:
         import threading
 
+        from ..cloud import metadata_project, on_cloud_run
+
         path = settings.vertex_key_path
+        self._metadata = path is None and on_cloud_run()  # Cloud Run: identidad del servicio, sin archivo
+        if self._metadata:
+            self._lock = threading.Lock()
+            self._token, self._expires_at = "", 0.0
+            project = settings.vertex_project or metadata_project()
+            self._init_endpoint(settings, project)
+            return
         if path is None:
             raise LLMUnavailable(
                 f"Falta el archivo de la cuenta de servicio de Vertex AI ({settings.vertex_credentials_file}). "
@@ -261,12 +270,15 @@ class VertexClient(AzureOpenAIClient):
             project = settings.vertex_project or info["project_id"]
         except (ValueError, KeyError) as exc:
             raise LLMUnavailable("El archivo de la cuenta de servicio de Vertex AI no es válido (se esperaba el JSON descargado de Google Cloud).") from exc
-        location = settings.vertex_location or "global"
-        host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
-        base_url = f"https://{host}/v1/projects/{project}/locations/{location}/endpoints/openapi"
         self._lock = threading.Lock()
         self._token = ""
         self._expires_at = 0.0
+        self._init_endpoint(settings, project)
+
+    def _init_endpoint(self, settings: Settings, project: str) -> None:
+        location = settings.vertex_location or "global"
+        host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
+        base_url = f"https://{host}/v1/projects/{project}/locations/{location}/endpoints/openapi"
         self._setup(settings, base_url, "pendiente", self._model_id(settings.gemini_model))
         self.fallback_model = self._model_id(settings.gemini_fallback_model) if settings.gemini_fallback_model else ""
 
@@ -275,6 +287,13 @@ class VertexClient(AzureOpenAIClient):
         return model if "/" in model else f"google/{model}"
 
     def _fetch_token(self) -> tuple[str, float]:
+        if getattr(self, "_metadata", False):
+            from ..cloud import metadata_token
+
+            try:
+                return metadata_token()
+            except Exception as exc:  # noqa: BLE001
+                raise LLMUnavailable("No se pudo obtener la identidad de Google Cloud para usar Vertex AI. Reintenta.") from exc
         import httpx
         import jwt
 

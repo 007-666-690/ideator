@@ -29,6 +29,10 @@ logger = logging.getLogger("ideator")
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
+    from .cloud import DatabaseSync, restore_database
+
+    restore_database(settings.database_url)  # Cloud Run: la base vive en Cloud Storage
+    db_sync = DatabaseSync(settings.database_url)
     engine = init_engine(settings.database_url)
     Base.metadata.create_all(engine)
     from .db import SessionLocal
@@ -42,7 +46,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         logger.info("Ideator iniciado", extra={"environment": settings.environment, "llm": settings.llm_provider})
+        db_sync.start()
         yield
+        db_sync.stop()
 
     app = FastAPI(
         title="Ideator API",

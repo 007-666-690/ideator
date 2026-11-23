@@ -111,7 +111,9 @@ class Settings(BaseSettings):
         if self.llm_provider == "gemini":
             return bool(self.gemini_api_key)
         if self.llm_provider == "vertex":
-            return self.vertex_key_path is not None
+            from .cloud import on_cloud_run
+
+            return self.vertex_key_path is not None or on_cloud_run()
         return bool(self.azure_openai_endpoint and self.azure_openai_api_key)
 
 
@@ -151,5 +153,8 @@ def get_settings() -> Settings:
     settings = Settings()
     if settings.azure_key_vault_url:
         _load_key_vault(settings)
+    from .cloud import ensure_secret_key
+
+    settings.secret_key = ensure_secret_key(settings.secret_key, DEFAULT_SECRET)
     validate_settings(settings)
     return settings
